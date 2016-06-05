@@ -46,6 +46,7 @@ class stamper(object):
         logging.debug('stampped {0} dirs, took {1}s'.format(len(self.dirs),
                                                            str(end-begin)))
 
+
 class mirror_site(object):
     """
     a mirror site status
@@ -63,16 +64,14 @@ class mirror_site(object):
         for k, v in dirs.iteritems():
             diff = utils.diff_timestamps(utils.get_timestamp(),
                                          int(v))
-            logging.debug('%s: %s: out-of-sync: %ss', self.url,
-                                                           k,
-                                                           diff)
+            loggin.debug('%s: %s: out-of-sync: %ss', self.url, k, diff)
 
 
 def generate_dirs(remote_path, amount, ssh_args, ts_fname):
     dirs = utils.walk_find(remote_path, ssh_args)
     dirs.sort(key=lambda x: x.count('/'), reverse=True)
     sample_dirs = random.sample(dirs, min(amount, len(dirs) - 1))
-    return ['%s/%s' %(x.strip(), ts_fname) for x in sample_dirs]
+    return ['%s/%s' % (x.strip(), ts_fname) for x in sample_dirs]
 
 
 def load_config(config_fname):
@@ -118,31 +117,16 @@ def main():
     # end of argparse
 
     configs = load_config(config_fname)
-    print configs
     backends = build_backends(configs)
-    for k,v in backends.iteritems():
+    for k, v in backends.iteritems():
         print 'starting backend: %s' % v.obj.name
         v.task.start(v.obj.stamp_interval)
-        for k2,v2 in v.obj.mirrors_tasks.iteritems():
+        for k2, v2 in v.obj.mirrors_tasks.iteritems():
             print 'starting backend: %s' % v2.obj.name
             v2.task.start(v2.obj.check_interval)
     reactor.run()
 
 
-#    reactor.run()
-    #initialize
-    # t_stamper = stamper(**configs.get('backend'))
-    # stamps = generate_dirs(t_stamper.remote_path, max_stamp,t_stamper.ssh_args,
-                           # configs.get('ts_fname'))
-    # t_stamper.dirs = stamps
-
-    # stamp_task = task.LoopingCall(t_stamper.run)
-    # stamp_task.start(t_stamper.stamping_interval)
-
-    # local_mirror = mirror_site('http://resources.ovirt.org/repos/ngoldin/mirror-tester/',
-                               # stamps)
-    # mirror_monitor = task.LoopingCall(local_mirror.check_stamps)
-    # mirror_monitor.start(stamp_interval + 1)
 
 if __name__ == '__main__':
     main()
