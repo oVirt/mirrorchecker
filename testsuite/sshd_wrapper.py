@@ -1,24 +1,21 @@
 import os
 import subprocess
 import shutil
-import time
 import contextlib
 import tempfile
 from subprocess import call
 
-class sshd_wrapper(object):
 
+class sshd_wrapper(object):
     def __init__(self, working_dir=None, server_key=None, port='3000'):
         self.port = port
         if not working_dir:
-
             running_dir = os.path.dirname(os.path.realpath(__file__))
-            running_dir = tempfile.mkdtemp(dir=running_dir)
-            self.working_dir = '%s/.sshd' % running_dir
+            self.working_dir = tempfile.mkdtemp(dir=running_dir)
+#            self.working_dir = '%s/.sshd' % running_dir
         else:
             self.working_dir = '%s/.sshd' % working_dir
-        tempfile.tempdir
-        os.mkdir(self.working_dir)
+#        os.mkdir(self.working_dir)
         os.chmod(self.working_dir, 0700)
         self.port = port
         self.p_sshd = None
@@ -77,9 +74,10 @@ class sshd_wrapper(object):
         key_file = '%s/id_rsa' % self.dirs['ssh']
         cmd = "ssh-keygen -b 2048 -t rsa -f %s -q -N ''" % key_file
         call(cmd, shell=True)
-        with open(key_file, 'r') as private_key, open('%s.pub' % key_file, 'r') as pub_key:
-            self.def_public_key = pub_key.read()
-            self.def_private_key = private_key.read()
+        with open(key_file, 'r') as private_key:
+            with open('%s.pub' % key_file, 'r') as pub_key:
+                self.def_public_key = pub_key.read()
+                self.def_private_key = private_key.read()
         self.add_auth_key(self.def_public_key)
 
     def start_sshd(self):
@@ -109,7 +107,8 @@ def sshd_server(*args, **kwargs):
 def main():
     with sshd_server() as sshd:
         print sshd.def_public_key
-        time.sleep(100)
+
+
 
 
 if __name__ == '__main__':

@@ -42,20 +42,30 @@ def diff_timestamps(ts1, ts2):
 def walk_find(remote_path, ssh_args):
     out = []
     cmd = "find {0} -type d -printf '%P\n'".format(remote_path)
- #   paramiko.util.log_to_file('paramiko.log')
-#    logging.getLogger("paramiko").setLevel(logging.DEBUG)
-    ssh = paramiko.SSHClient()
+    ssh, proxy = get_ssh(ssh_args)
 
     logging.debug('%s', ssh_args)
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    ssh.connect(**ssh_args)
     stdin, stdout, stderr = ssh.exec_command(cmd, timeout=10)
     out = [line for line in stdout.readlines()]
     err = [line for line in stderr.readlines()]
     ssh.close()
+    proxy.close()
     if len(err) > 0:
         raise paramiko.SSHException('error executing %s, stderr: %s' % (cmd, err))
     return out
 
 def get_timestamp(format=None):
     return int(time.time())
+
+def get_ssh(ssh_args):
+    local_sshargs = dict(ssh_args)
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    proxy_cmd = local_sshargs.pop('proxy_cmd', False)
+    ssh_proxy = None
+    if proxy_cmd:
+        proxy_cmd = proxy_cmd.replace('%h', local_sshargs['hostname'])
+        proxy_cmd = proxy_cmd.replace('%p', local_sshargs.get('port', '22'))
+        ssh_proxy = paramiko.ProxyCommand(proxy_cmd)
+    ssh.connect(sock = ssh_proxy, **local_sshargs)
+    return ssh, ssh_proxy if ssh_proxy else type("", (), dict(close=lambda x: None))()
