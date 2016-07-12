@@ -54,6 +54,7 @@ class stamper(object):
             except SSHException:
                 logger.exception('exception while stamping %s', path)
         end = time.time()
+
         logger.debug('renewed timestamps on %s dirs, took %ss',
                      len(self.dirs),
                      str(end-begin))
