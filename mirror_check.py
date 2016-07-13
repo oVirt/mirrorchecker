@@ -3,7 +3,7 @@ import utils
 import logging
 import random
 import yaml
-from flask import Flask
+from flask import Flask, abort, jsonify
 from twisted.web.resource import Resource
 from twisted.internet import task
 from twisted.internet import reactor
@@ -155,14 +155,16 @@ def get_mirrors(mirror_name):
     if mirror_name == 'all':
         mirrors = []
         for name, mirror in backend.mirror_tasks.iteritems():
-            mirrors.append('%s: %s\n' % (name, mirror.max_diff()))
-        return ''.join(mirrors)
+            mirrors.append({'mirror_name': name,
+                            'last_sync': mirror.max_diff()})
+        return jsonify({'mirrors': mirrors})
 
     mirror = backend.mirror_tasks.get(mirror_name)
     if mirror:
-        return str(mirror.max_diff())
+        return jsonify({'mirrors': {'mirror_name': mirror_name,
+                        'last-sync': mirror.max_diff()}})
     else:
-        return 'not found'
+        return abort(404)
 
 
 def main():
