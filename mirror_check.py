@@ -11,7 +11,7 @@ from twisted.web.wsgi import WSGIResource
 from twisted.web.server import Site
 from paramiko.ssh_exception import SSHException
 
-defaults = {
+DEFAULTS = {
     'log_level': 'debug',
     'log_file': 'mirror_checker.log',
     'http_port': 8080,
@@ -104,7 +104,6 @@ class mirror_site(object):
 
 
 def setup_logger(log_file, log_level):
-    global logger
     level = logging.INFO
     if log_level == 'debug':
         level = logging.DEBUG
@@ -131,20 +130,18 @@ def generate_dirs(dirs, remote_path, amount, ssh_args, ts_fname):
 
 
 def load_config(config_fname):
-    global defaults
     configs_yaml = {}
     try:
         with open(config_fname, 'r') as config_file:
             configs_yaml = yaml.load(config_file)
     except IOError:
         logging.error('failed to open %s, using defaults', config_file)
-    configs = defaults.copy()
+    configs = DEFAULTS.copy()
     configs.update(configs_yaml)
     return configs
 
 
 def build_backend(backend_confs):
-    global backend
     backend = stamper(**backend_confs)
     backend.dirs = generate_dirs(backend.dirs,
                                  backend.remote_path,
@@ -161,14 +158,12 @@ def build_backend(backend_confs):
 
 @app.route('/mirrors', methods=['GET'])
 def get_all_mirrors():
-    global backend
     result = [mirror for mirror in backend.mirror_tasks.iterkeys()]
     return jsonify({'mirrors': result})
 
 
 @app.route('/mirrors/<mirror_name>', methods=['GET'])
 def get_mirrors(mirror_name):
-    global backend
     mirror = backend.mirror_tasks.get(mirror_name, False)
     if mirror:
         result = {attr: mirror.__dict__.get(attr)
@@ -180,7 +175,6 @@ def get_mirrors(mirror_name):
 
 @app.route('/mirrors/<mirror_name>/<mirror_attr>', methods=['GET'])
 def get_mirror_attr(mirror_name, mirror_attr):
-    global backend
     mirror = backend.mirror_tasks.get(mirror_name, False)
     if mirror and mirror.exposes.get(mirror_attr, False):
         return jsonify({mirror_attr: mirror.__dict__.get(mirror_attr, None)})
