@@ -77,6 +77,10 @@ class mirror_site(object):
         self.name = name
         self.task = task.LoopingCall(self.run)
         self.diff = {x: -1 for x in self.stamps}
+        self.max_diff = -1
+        filter_keys = ['task']
+        self.exposes = {key: 1 for key in self.__dict__.iterkeys()
+                        if key not in filter_keys}
 
     def run(self):
         logger.debug('checking stamps for %s', self.url)
@@ -85,12 +89,18 @@ class mirror_site(object):
         for key, value in dirs.iteritems():
             self.diff[key] = utils.diff_timestamps(utils.get_timestamp(),
                                                    value)
+        self.max_diff = self.__max_diff()
 
     def start(self):
         self.task.start(self.check_interval, now=False)
 
-    def max_diff(self):
+    def __max_diff(self):
         return max(v for v in self.diff.itervalues())
+
+    def expose(self):
+        return {'name': self.name,
+                'max_diff': self.max_diff(),
+                'all_diff': self.diff}
 
 
 def setup_logger(log_file, log_level):
@@ -149,22 +159,33 @@ def build_backend(backend_confs):
     return backend
 
 
+@app.route('/mirrors', methods=['GET'])
+def get_all_mirrors():
+    global backend
+    result = [mirror for mirror in backend.mirror_tasks.iterkeys()]
+    return jsonify({'mirrors': result})
+
+
 @app.route('/mirrors/<mirror_name>', methods=['GET'])
 def get_mirrors(mirror_name):
     global backend
-    if mirror_name == 'all':
-        mirrors = []
-        for name, mirror in backend.mirror_tasks.iteritems():
-            mirrors.append({'mirror_name': name,
-                            'last_sync': mirror.max_diff()})
-        return jsonify({'mirrors': mirrors})
-
-    mirror = backend.mirror_tasks.get(mirror_name)
+    mirror = backend.mirror_tasks.get(mirror_name, False)
     if mirror:
-        return jsonify({'mirrors': {'mirror_name': mirror_name,
-                        'last-sync': mirror.max_diff()}})
+        result = {attr: mirror.__dict__.get(attr)
+                  for attr in mirror.exposes.iterkeys()}
+        return jsonify({mirror_name: result})
     else:
         return abort(404)
+
+
+@app.route('/mirrors/<mirror_name>/<mirror_attr>', methods=['GET'])
+def get_mirror_attr(mirror_name, mirror_attr):
+    global backend
+    mirror = backend.mirror_tasks.get(mirror_name, False)
+    if mirror and mirror.exposes.get(mirror_attr, False):
+        return jsonify({mirror_attr: mirror.__dict__.get(mirror_attr, None)})
+    else:
+        abort(404)
 
 
 def main():
@@ -172,7 +193,7 @@ def main():
     config_fname = 'mirrors.yaml'
     configs = load_config(config_fname)
     setup_logger(configs['log_file'], configs['log_level'])
-    # to-do: add support for multiply backends
+    # to-do: add support for multi backends
     backend = build_backend(configs.get('backends')[0])
     backend.start()
     for mirror in backend.mirror_tasks.values():
