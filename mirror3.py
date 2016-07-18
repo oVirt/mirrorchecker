@@ -1,32 +1,49 @@
+import functools
 import socket
+import time
+import json
 import argparse
 import logging
 import asyncio
 import aiohttp
+from aiohttp import web
 import yaml
 import paramiko
-import functools
 from paramiko.ssh_exception import SSHException
-import time
 
-LOGGER='mirror_checker'
+LOGGER = 'mirror_checker'
+
 class MirrorAPI(object):
-    def __init__(self, loop, backend, host='localhost', port='8080'):
-        pass
+    def __init__(self, loop, backend, host='127.0.0.1', port=8080):
+        self.loop = loop
+        self.backend = backend
+        self.host = host
+        self.port = port
+        self.app = web.Application(loop=loop)
+        self.handler = self.Hanlders(self.backend)
+        self.app.router.add_route('GET', '/mirrors/{mirror_name}',
+                                  self.handler.mirror)
+        self.app.router.add_route('GET', '/mirrors', self.handler.all_mirrors)
 
-
-    def _init_http(loop):
-        pass
+    async def init_server(self):
+        srv = await self.loop.create_server(self.app.make_handler(), self.host,
+                                            self.port)
+        return srv
 
     class Hanlders(object):
         def __init__(self, backend):
             self.backend = backend
 
-        def all_mirrors(self, request):
-            pass
+        async def all_mirrors(self, request):
+            result = {}
+            for mirror in self.backend.mirrors.values():
+                result[mirror.url] = int(time.time()) - mirror.max_ts
+            return web.Response(
+                body=json.dumps({'mirrors': result}).encode('utf-8'),
+                content_type='application/json')
 
-        def mirror(self, request):
-            pass
+        async def mirror(self, request):
+            return web.Response(text="single_mirror")
 
 
 class Backend(object):
@@ -36,13 +53,17 @@ class Backend(object):
         self.configs = configs
         if not configs.get('dirs', False):
             self.configs['dirs'] = self._generate_dirs()
-        self.configs['dirs'] = ['/'.join([dir, self.configs['ts_fname']]) for dir in self.configs['dirs']]
-        self.loop.run_in_executor(None,
-                                  func=functools.partial(self._send_scp,
-                                                         self.configs))
+        self.configs['dirs'] = ['/'.join([dir,
+                                          self.configs['ts_fname']])
+                                for dir in self.configs['dirs']]
         self.mirrors = self._build_mirrors()
         self.last_ts = -1
         # confirm directories exists or pick random dirs
+
+    def run(self):
+        self.loop.run_in_executor(None,
+                                  func=functools.partial(self._send_scp,
+                                                         self.configs))
 
     def _build_mirrors(self):
         mirrors = {}
@@ -58,7 +79,7 @@ class Backend(object):
                 sftp = ssh.open_sftp()
                 begin = time.time()
                 for file in configs['dirs']:
-                    path = '/'.join([configs['remote_path'],file.strip()])
+                    path = '/'.join([configs['remote_path'], file.strip()])
                     try:
                         logger.debug('%s: sending %s', configs['remote_path'],
                                      path)
@@ -78,8 +99,9 @@ class Backend(object):
 
     def _generate_dirs(self):
         raise NotImplementedError
+
     def _discover_dirs(self):
-        pass
+        raise NotImplementedError
 
 
     def _get_ssh(self):
@@ -113,6 +135,7 @@ class Mirror(object):
         self.interval = interval
         self.status = {}
         self.task = asyncio.ensure_future(self._aggr_files(), loop=self.loop)
+        self.max_ts = -1
 
 
     async def _get_file(self, session, url):
@@ -125,18 +148,20 @@ class Mirror(object):
         logger = logging.getLogger(LOGGER)
         while True:
             with aiohttp.ClientSession(loop=self.loop) as session:
-                results = await asyncio.gather(*[self._get_file(session,
-                    '/'.join([self.url, file])) for file in  self.files],
-                                               return_exceptions=True)
+                results = await asyncio.gather(
+                    *[self._get_file(session, '/'.join([self.url, file]))
+                      for file in  self.files],
+                    return_exceptions=True)
                 for url, timestamp in results:
                     self.status[url] = timestamp
+                    self.max_ts = max(int(self.max_ts), int(timestamp))
 
                 logger.info('got results: %s', self.status)
             await asyncio.sleep(self.interval)
 
 
 def setup_logger(log_file, log_level):
-    #TO-DO setup none-blocking logging
+    #TO-DO setup none-blocking logging with queue
     logger = logging.getLogger(LOGGER)
     level = logging.INFO
     if log_level == 'debug':
@@ -157,7 +182,7 @@ def setup_logger(log_file, log_level):
 
 
 def load_config(config_fname):
-    DEFAULTS = {
+    defaults = {
         'log_level': 'debug',
         'log_file': 'mirror_checker.log',
         'http_port': 8080,
@@ -169,10 +194,8 @@ def load_config(config_fname):
     except IOError:
         print('failed to open %s', config_fname)
         raise
-    configs = DEFAULTS.copy()
+    configs = defaults.copy()
     configs.update(configs_yaml)
-
-
     return configs
 
 
@@ -188,10 +211,12 @@ def main():
         loop = asyncio.get_event_loop()
         backend = Backend(loop=loop, configs=configs['backends'][0].copy())
         mirror_api = MirrorAPI(loop=loop, backend=backend)
+        loop.run_until_complete(mirror_api.init_server())
+        backend.run()
         logger.info('starting event loop')
         loop.run_forever()
     except Exception:
-        logger.exception('exception in main: ')
+        logger.exception('fatal exception, exiting: ')
 
 if __name__ == '__main__':
     main()
