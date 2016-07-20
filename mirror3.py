@@ -3,12 +3,12 @@ import time
 import json
 import argparse
 import logging
+import threading
 import asyncio
 import aiohttp
 from aiohttp import web
 import yaml
 import paramiko
-import threading
 LOGGER = 'mirror_checker'
 
 class MirrorAPI(object):
@@ -25,11 +25,8 @@ class MirrorAPI(object):
                                       '{mirror_name}'
                                   ),
                                   self.handler.mirror)
-        self.app.router.add_route('GET',self.backend.configs['http_prefix'],
+        self.app.router.add_route('GET', self.backend.configs['http_prefix'],
                                   self.handler.all_mirrors)
-        logger = logging.getLogger(LOGGER)
-        logger.debug('{0}/{1}'.format(self.backend.configs['http_prefix'],
-                                      self.backend.configs['yum_mirror_request']))
         self.app.router.add_route('GET',
                                   '{0}/{1}'.format(
                                       self.backend.configs['http_prefix'],
@@ -45,13 +42,13 @@ class MirrorAPI(object):
         return self.srv
 
     async def shutdown(self):
-            try:
-                await self.srv.close()
-                await self.loop.run_until_complete(self.srv.wait_closed())
-                await self.loop.run_until_complete(self.app.shutdown())
-                await self.loop.run_until_complete(self.app.cleanup())
-            except asyncio.CancelledError:
-                pass
+        try:
+            await self.srv.close()
+            await self.loop.run_until_complete(self.srv.wait_closed())
+            await self.loop.run_until_complete(self.app.shutdown())
+            await self.loop.run_until_complete(self.app.cleanup())
+        except asyncio.CancelledError:
+            pass
 
     class Hanlders(object):
         def __init__(self, backend):
@@ -78,19 +75,18 @@ class MirrorAPI(object):
             return web.Response(text="single_mirror")
 
         async def yum_mirrorlist(self, request):
-
             results = ('{0}/{1}\n'.format(mirror.url,
                                           self.backend.configs['yum_suffix'])
                        for mirror in self.backend.mirrors.values() if
                        mirror.max_ts > 0 and
-                       int(time.time()) - mirror.max_ts <
-                       self.backend.configs['yum_threshold']
-                       )
+                       (int(time.time()) - mirror.max_ts <
+                        self.backend.configs['yum_threshold'])
+                      )
             results = (result.replace('@VERSION@',
                                       request.match_info['version'])
                        .replace('@DIST@',
                                 request.match_info['dist'])
-                       for result in results )
+                       for result in results)
             return web.Response(
                 body=''.join(results).encode('utf-8'))
 
@@ -116,7 +112,7 @@ class Backend(object):
                                                    func=functools.partial(
                                                        self._send_scp,
                                                        self.configs,
-                                                   self._cancel_event))
+                                                       self._cancel_event))
     async def shutdown(self):
         if self._scp_task:
             self._scp_task.cancel()
@@ -133,7 +129,7 @@ class Backend(object):
 
     def _send_scp(self, configs, cancel_event):
         logger = logging.getLogger(LOGGER)
-        while True and not self._cancel_event.is_set():
+        while True and not cancel_event.is_set():
             try:
                 with self._get_ssh() as ssh:
                     sftp = ssh.open_sftp()
@@ -147,15 +143,14 @@ class Backend(object):
                     end = time.time()
 
                     logger.info('sent %s files to %s:%s, took: %.4fs',
-                                 len(self.configs['dirs']),
+                                len(self.configs['dirs']),
                                 self.configs['ssh_args']['hostname'],
                                 self.configs['remote_path'],
                                 (end-begin))
-
-
-            except Exception as err:
-                logger.exception('exception type:%s  %s, args: %s', type(err), type(err).__name__, err.args)
-            time.sleep(configs['stamp_interval'])
+            except:
+                logger.exception('error sending files over SCP')
+            finally:
+                time.sleep(configs['stamp_interval'])
 
 
 
@@ -213,7 +208,7 @@ class Mirror(object):
                 with aiohttp.ClientSession(loop=self.loop) as session:
                     results = await asyncio.gather(
                         *[self._get_file(session, '/'.join([self.url, file]))
-                        for file in  self.files],
+                          for file in  self.files],
                         return_exceptions=True)
                     for result in results:
                         if type(result).__name__ == 'TimeoutError':
@@ -249,7 +244,8 @@ def setup_logger(log_file, log_level):
         level = logging.ERROR
     elif log_level == 'warning':
         level = logging.WARNING
-    log_formatter = ('%(threadName)s::%(levelname)s::%(asctime)s::%(lineno)d::(%(funcName)s) %(message)s')
+    log_formatter = ('%(threadName)s::%(levelname)s::%(asctime)s'
+                     '::%(lineno)d::(%(funcName)s) %(message)s')
     fmt = logging.Formatter(log_formatter)
     file_h = logging.FileHandler(log_file)
     file_h.setLevel(level)
