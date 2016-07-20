@@ -1,5 +1,4 @@
 import functools
-import socket
 import time
 import json
 import argparse
@@ -13,16 +12,30 @@ import threading
 LOGGER = 'mirror_checker'
 
 class MirrorAPI(object):
-    def __init__(self, loop, backend, host='127.0.0.1', port=8080):
+    def __init__(self, loop, backend, host='localhost', port=8080):
         self.loop = loop
         self.backend = backend
         self.host = host
         self.port = port
         self.app = web.Application(loop=loop)
         self.handler = self.Hanlders(self.backend)
-        self.app.router.add_route('GET', '/mirrors/{mirror_name}',
+        self.app.router.add_route('GET',
+                                  '{0}/{1}'.format(
+                                      self.backend.configs['http_prefix'],
+                                      '{mirror_name}'
+                                  ),
                                   self.handler.mirror)
-        self.app.router.add_route('GET', '/mirrors', self.handler.all_mirrors)
+        self.app.router.add_route('GET',self.backend.configs['http_prefix'],
+                                  self.handler.all_mirrors)
+        logger = logging.getLogger(LOGGER)
+        logger.debug('{0}/{1}'.format(self.backend.configs['http_prefix'],
+                                      self.backend.configs['yum_mirror_request']))
+        self.app.router.add_route('GET',
+                                  '{0}/{1}'.format(
+                                      self.backend.configs['http_prefix'],
+                                      self.backend.configs['yum_mirror_request']
+                                  ), self.handler.yum_mirrorlist)
+
         self.srv = None
 
     async def init_server(self):
@@ -50,7 +63,11 @@ class MirrorAPI(object):
                 if mirror.max_ts < 0:
                     result[mirror.url] = mirror.max_ts
                 else:
-                    result[mirror.url] = int(time.time()) - mirror.max_ts
+                    seconds = int(time.time()) - mirror.max_ts
+                    res = {'in_seconds': seconds,
+                           'in_minutes': round(seconds/60, 2),
+                           'in_hours': round(seconds/60/60, 2)}
+                    result[mirror.url] = res
             return web.Response(
                 body=json.dumps({'mirrors': result},
                                 sort_keys=True,
@@ -59,6 +76,24 @@ class MirrorAPI(object):
 
         async def mirror(self, request):
             return web.Response(text="single_mirror")
+
+        async def yum_mirrorlist(self, request):
+
+            results = ('{0}/{1}\n'.format(mirror.url,
+                                          self.backend.configs['yum_suffix'])
+                       for mirror in self.backend.mirrors.values() if
+                       mirror.max_ts > 0 and
+                       int(time.time()) - mirror.max_ts <
+                       self.backend.configs['yum_threshold']
+                       )
+            results = (result.replace('@VERSION@',
+                                      request.match_info['version'])
+                       .replace('@DIST@',
+                                request.match_info['dist'])
+                       for result in results )
+            return web.Response(
+                body=''.join(results).encode('utf-8'))
+
 
 
 class Backend(object):
@@ -75,7 +110,6 @@ class Backend(object):
         self.last_ts = -1
         self._scp_task = None
         self._cancel_event = threading.Event()
-        # confirm directories exists or pick random dirs
 
     def run(self):
         self._scp_task = self.loop.run_in_executor(None,
@@ -83,12 +117,12 @@ class Backend(object):
                                                        self._send_scp,
                                                        self.configs,
                                                    self._cancel_event))
-    def shutdown(self):
+    async def shutdown(self):
         if self._scp_task:
             self._scp_task.cancel()
             self._cancel_event.set()
         for mirror in self.mirrors.values():
-            mirror.shutdown()
+            await mirror.shutdown()
 
     def _build_mirrors(self):
         mirrors = {}
@@ -159,8 +193,8 @@ class Mirror(object):
         self.task = asyncio.ensure_future(self._aggr_files(), loop=self.loop)
         self.max_ts = -1
 
-    def shutdown(self):
-        self.task.cancel()
+    async def shutdown(self):
+        await self.task.cancel()
 
     async def _get_file(self, session, url):
         with aiohttp.Timeout(10):
@@ -174,20 +208,26 @@ class Mirror(object):
         logger = logging.getLogger(LOGGER)
         while True:
             try:
-                fetched = len(self.files)
+                fetched = 0
                 begin = time.time()
                 with aiohttp.ClientSession(loop=self.loop) as session:
                     results = await asyncio.gather(
                         *[self._get_file(session, '/'.join([self.url, file]))
                         for file in  self.files],
                         return_exceptions=True)
-                    for url, timestamp in results:
-                        if not timestamp:
-                            logger.warning('failed fetching %s', url)
-                            fetched = fetched - 1
+                    for result in results:
+                        if type(result).__name__ == 'TimeoutError':
+                            logger.warning('failed fetching %s, TimeoutError')
                         else:
-                            self.status[url] = timestamp
-                            self.max_ts = max(int(self.max_ts), int(timestamp))
+                            url, timestamp = result
+                            if not timestamp:
+                                logger.warning('failed fetching %s, not found',
+                                               url)
+                            else:
+                                self.status[url] = timestamp
+                                self.max_ts = max(int(self.max_ts),
+                                                  int(timestamp))
+                                fetched = fetched + 1
                 end = time.time()
                 logger.info('fetched %s/%s files from %s, took: %.4fs', fetched,
                             len(self.files),
@@ -224,7 +264,9 @@ def load_config(config_fname):
         'log_level': 'debug',
         'log_file': 'mirror_checker.log',
         'http_port': 8080,
-        'http_prefix': 'api'}
+        'http_host': 'localhost',
+        'http_prefix': 'api',
+    }
     configs_yaml = {}
     try:
         with open(config_fname, 'r') as config_file:
@@ -247,9 +289,10 @@ def main():
     logger.info('loaded configuration:\n %s', flat_config)
     try:
         loop = asyncio.get_event_loop()
-        loop.set_debug(enabled=True)
         backend = Backend(loop=loop, configs=configs['backends'][0].copy())
-        mirror_api = MirrorAPI(loop=loop, backend=backend)
+        mirror_api = MirrorAPI(loop=loop, backend=backend,
+                               port=configs['http_port'],
+                               host=configs['http_host'])
         loop.run_until_complete(mirror_api.init_server())
         backend.run()
         logger.info('starting event loop')
