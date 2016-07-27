@@ -6,6 +6,9 @@ import logging
 import threading
 import asyncio
 import aiohttp
+import signal
+from concurrent.futures import ThreadPoolExecutor
+from paramiko.ssh_exception import SSHException
 from aiohttp import web
 import yaml
 import paramiko
@@ -41,14 +44,11 @@ class MirrorAPI(object):
                                                  self.port)
         return self.srv
 
-    async def shutdown(self):
-        try:
-            await self.srv.close()
-            await self.loop.run_until_complete(self.srv.wait_closed())
-            await self.loop.run_until_complete(self.app.shutdown())
-            await self.loop.run_until_complete(self.app.cleanup())
-        except asyncio.CancelledError:
-            pass
+    def shutdown(self):
+        self.srv.close()
+        asyncio.ensure_future(self.srv.wait_closed())
+        asyncio.ensure_future(self.app.shutdown())
+        asyncio.ensure_future(self.app.cleanup())
 
     class Hanlders(object):
         def __init__(self, backend):
@@ -106,19 +106,25 @@ class Backend(object):
         self.last_ts = -1
         self._scp_task = None
         self._cancel_event = threading.Event()
+        self._executor = ThreadPoolExecutor(max_workers=1)
 
     def run(self):
-        self._scp_task = self.loop.run_in_executor(None,
+
+        self._scp_task = self.loop.run_in_executor(self._executor,
                                                    func=functools.partial(
                                                        self._send_scp,
                                                        self.configs,
                                                        self._cancel_event))
-    async def shutdown(self):
+    def shutdown(self):
         if self._scp_task:
-            self._scp_task.cancel()
             self._cancel_event.set()
+            self._scp_task.cancel()
+            logger = logging.getLogger(LOGGER)
+            logger.debug('shutdown executor..')
+#            self._executor.shutdown(wait=True)
+            logger.debug('end shutdown executor')
         for mirror in self.mirrors.values():
-            await mirror.shutdown()
+            mirror.shutdown()
 
     def _build_mirrors(self):
         mirrors = {}
@@ -147,10 +153,11 @@ class Backend(object):
                                 self.configs['ssh_args']['hostname'],
                                 self.configs['remote_path'],
                                 (end-begin))
-            except:
+
+                cancel_event.wait(configs['stamp_interval'])
+            except SSHException:
                 logger.exception('error sending files over SCP')
-            finally:
-                time.sleep(configs['stamp_interval'])
+
 
 
 
@@ -188,8 +195,8 @@ class Mirror(object):
         self.task = asyncio.ensure_future(self._aggr_files(), loop=self.loop)
         self.max_ts = -1
 
-    async def shutdown(self):
-        await self.task.cancel()
+    def shutdown(self):
+        self.task.cancel()
 
     async def _get_file(self, session, url):
         with aiohttp.Timeout(10):
@@ -212,7 +219,9 @@ class Mirror(object):
                         return_exceptions=True)
                     for result in results:
                         if type(result).__name__ == 'TimeoutError':
-                            logger.warning('failed fetching %s, TimeoutError')
+                            logger.warning('failed fetching %s', TimeoutError)
+                        if type(result).__name__ == 'CancelledError':
+                            raise asyncio.CancelledError()
                         else:
                             url, timestamp = result
                             if not timestamp:
@@ -228,10 +237,13 @@ class Mirror(object):
                             len(self.files),
                             self.url,
                             end - begin)
+
+                await asyncio.sleep(self.interval)
+            except asyncio.CancelledError:
+                raise
             except:
                 logger.exception('error fetching files from %s', self.url)
-            finally:
-                await asyncio.sleep(self.interval)
+                raise
 
 
 def setup_logger(log_file, log_level):
@@ -274,6 +286,38 @@ def load_config(config_fname):
     configs.update(configs_yaml)
     return configs
 
+async def shutdown(sig, loop, backend, mirror_api, shutdown_event):
+    logger = logging.getLogger(LOGGER)
+    logger.info('caught %s, scheduling tasks cancellation', sig.name)
+    mirror_api.shutdown()
+    backend.shutdown()
+    tasks = [task for task in asyncio.Task.all_tasks() if task is not
+             asyncio.tasks.Task.current_task()]
+
+    logger.debug('is done: %s? is cancelled %s?', backend._scp_task.done(),
+                 backend._scp_task.cancelled())
+    result = await asyncio.gather(*tasks, return_exceptions=True)
+    logger.info('all tasks ended, stopping event loop, %s', result)
+    shutdown_event.set()
+
+def kill_app(sig, loop, backend, mirror_api, shutdown_event):
+    def _stop_loop(loop, sd_event, timeout=100):
+        logger = logging.getLogger(LOGGER)
+        logger.debug('in _stop_loop, waiting')
+        sd_event.wait(timeout=timeout)
+        logger.debug('finished waiting, ending loop')
+        loop.stop()
+
+    asyncio.ensure_future(shutdown(signal.SIGINT,
+                                   loop,
+                                   backend,
+                                   mirror_api,
+                                   shutdown_event))
+    shutdown_thread = threading.Thread(target=_stop_loop,
+                                       args=(loop, shutdown_event))
+    shutdown_thread.daemon = True
+    shutdown_thread.start()
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -283,28 +327,42 @@ def main():
     logger = setup_logger(configs['log_file'], configs['log_level'])
     flat_config = '\n'.join('\t{}: {}'.format(key, val) for key, val in configs.items())
     logger.info('loaded configuration:\n %s', flat_config)
+    loop = asyncio.get_event_loop()
+    backend = Backend(loop=loop, configs=configs['backends'][0].copy())
+    mirror_api = MirrorAPI(loop=loop, backend=backend,
+                           port=configs['http_port'],
+                           host=configs['http_host'])
+    shutdown_event = threading.Event()
+    loop.add_signal_handler(signal.SIGINT, functools.partial(kill_app,
+                                                             signal.SIGINT,
+                                                             loop,
+                                                             backend,
+                                                             mirror_api,
+                                                             shutdown_event))
+
+
+# loop.add_signal_handler(signal.SIGINT,
+                            # functools.partial(asyncio.ensure_future,
+                                              # shutdown(signal.SIGINT,
+                                                       # loop,
+                                                       # backend,
+                                                       # mirror_api,
+                                                       # shutdown_event
+#    loop.add_signal_handler(signal.SIGUSR1, stop_loop, signal.SIGUSR1, loop)
+#    loop.add_signal_handler(signal.SIGUSR1, stop_loop, signal.SIGUSR1, loop)
+    loop.run_until_complete(mirror_api.init_server())
+    backend.run()
     try:
-        loop = asyncio.get_event_loop()
-        backend = Backend(loop=loop, configs=configs['backends'][0].copy())
-        mirror_api = MirrorAPI(loop=loop, backend=backend,
-                               port=configs['http_port'],
-                               host=configs['http_host'])
-        loop.run_until_complete(mirror_api.init_server())
-        backend.run()
+        loop.set_debug(enabled=True)
+        logging.basicConfig(level=logging.DEBUG)
         logger.info('starting event loop')
         loop.run_forever()
-    except KeyboardInterrupt:
-        logger.exception('caught keyboard interrupt')
-        raise
     except Exception:
-        logger.exception('caught fatal exception')
+        logger.exception('caught exception')
         raise
     finally:
-        logger.info('starting shutdown')
-        backend.shutdown()
-        mirror_api.shutdown()
+        logger.info('shutting down event loop')
         loop.close()
-        logger.info('shutdown complete')
 
 
 if __name__ == '__main__':
