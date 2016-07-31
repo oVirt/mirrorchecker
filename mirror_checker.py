@@ -162,6 +162,7 @@ class Backend(object):
         with self._get_ssh(ssh_args) as ssh:
             sftp = ssh.open_sftp()
             yield sftp
+            sftp.close()
 
     @contextmanager
     def _get_ssh(self, ssh_args):
