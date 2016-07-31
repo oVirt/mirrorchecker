@@ -5,13 +5,16 @@ import argparse
 import logging
 import threading
 import asyncio
-import aiohttp
 import signal
+from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor
-from paramiko.ssh_exception import SSHException
-from aiohttp import web
+
 import yaml
+import aiohttp
+from aiohttp import web
 import paramiko
+from paramiko.ssh_exception import SSHException
+
 LOGGER = 'mirror_checker'
 
 class MirrorAPI(object):
@@ -106,25 +109,29 @@ class Backend(object):
         self.last_ts = -1
         self._scp_task = None
         self._cancel_event = threading.Event()
-        self._executor = ThreadPoolExecutor(max_workers=1)
+        self._executor = ThreadPoolExecutor(max_workers=5)
 
     def run(self):
-
         self._scp_task = self.loop.run_in_executor(self._executor,
                                                    func=functools.partial(
                                                        self._send_scp,
                                                        self.configs,
                                                        self._cancel_event))
-    def shutdown(self):
+    async def shutdown(self):
         if self._scp_task:
             self._cancel_event.set()
+            try:
+                await asyncio.wait_for(self._scp_task, timeout=5.0)
+            except SSHException:
+                pass
+            except asyncio.TimeoutError:
+                pass
             self._scp_task.cancel()
-            logger = logging.getLogger(LOGGER)
-            logger.debug('shutdown executor..')
-#            self._executor.shutdown(wait=True)
-            logger.debug('end shutdown executor')
+            self._executor.shutdown(wait=True)
         for mirror in self.mirrors.values():
             mirror.shutdown()
+
+
 
     def _build_mirrors(self):
         mirrors = {}
@@ -135,30 +142,30 @@ class Backend(object):
 
     def _send_scp(self, configs, cancel_event):
         logger = logging.getLogger(LOGGER)
-        while True and not cancel_event.is_set():
+
+        while not cancel_event.is_set():
             try:
-                with self._get_ssh() as ssh:
-                    sftp = ssh.open_sftp()
+
+                with self._get_sftp(self.configs['ssh_args']) as sftp:
                     begin = time.time()
                     for file in configs['dirs']:
-                        path = '/'.join([configs['remote_path'], file.strip()])
+                        path = '/'.join([configs['remote_path'],
+                                         file.strip()])
                         with sftp.open(path, 'w') as remote_file:
                             timestamp = int(time.time())
                             remote_file.write(str(timestamp))
                             self.last_ts = timestamp
                     end = time.time()
-
                     logger.info('sent %s files to %s:%s, took: %.4fs',
                                 len(self.configs['dirs']),
                                 self.configs['ssh_args']['hostname'],
                                 self.configs['remote_path'],
                                 (end-begin))
-
                 cancel_event.wait(configs['stamp_interval'])
             except SSHException:
                 logger.exception('error sending files over SCP')
-
-
+                if cancel_event.is_set():
+                    raise
 
 
     def _generate_dirs(self):
@@ -167,9 +174,15 @@ class Backend(object):
     def _discover_dirs(self):
         raise NotImplementedError
 
+    @contextmanager
+    def _get_sftp(self, ssh_args):
+        with self._get_ssh(ssh_args) as ssh:
+            sftp = ssh.open_sftp()
+            yield sftp
 
-    def _get_ssh(self):
-        local_sshargs = dict(self.configs['ssh_args'])
+    @contextmanager
+    def _get_ssh(self, ssh_args):
+        local_sshargs = dict(ssh_args)
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         proxy_cmd = local_sshargs.pop('proxy_cmd', False)
@@ -179,14 +192,14 @@ class Backend(object):
             proxy_cmd = proxy_cmd.replace('%p', local_sshargs.get('port', '22'))
             ssh_proxy = paramiko.ProxyCommand(proxy_cmd)
         ssh.connect(sock=ssh_proxy, **local_sshargs)
-        return ssh
-        # except (IOError, socket.timeout, SSHException,
-                # ProxyCommandFailure, BrokenPipeError) as err:
+        yield ssh
+        ssh.close()
+        if ssh_proxy:
+            ssh_proxy.close()
 
 
 class Mirror(object):
     def __init__(self, loop, files, url, interval=90):
-        # create task
         self.loop = loop
         self.files = files
         self.url = url
@@ -218,10 +231,10 @@ class Mirror(object):
                           for file in  self.files],
                         return_exceptions=True)
                     for result in results:
-                        if type(result).__name__ == 'TimeoutError':
-                            logger.warning('failed fetching %s', TimeoutError)
-                        if type(result).__name__ == 'CancelledError':
-                            raise asyncio.CancelledError()
+                        if isinstance(result, asyncio.CancelledError):
+                            raise asyncio.CancelledError(result.args)
+                        if isinstance(result, Exception):
+                            logger.warning('failed fetching: %s', repr(result))
                         else:
                             url, timestamp = result
                             if not timestamp:
@@ -243,7 +256,6 @@ class Mirror(object):
                 raise
             except:
                 logger.exception('error fetching files from %s', self.url)
-                raise
 
 
 def setup_logger(log_file, log_level):
@@ -286,37 +298,23 @@ def load_config(config_fname):
     configs.update(configs_yaml)
     return configs
 
-async def shutdown(sig, loop, backend, mirror_api, shutdown_event):
+async def shutdown(loop, backend, mirror_api):
     logger = logging.getLogger(LOGGER)
-    logger.info('caught %s, scheduling tasks cancellation', sig.name)
     mirror_api.shutdown()
-    backend.shutdown()
+    await backend.shutdown()
     tasks = [task for task in asyncio.Task.all_tasks() if task is not
              asyncio.tasks.Task.current_task()]
-
-    logger.debug('is done: %s? is cancelled %s?', backend._scp_task.done(),
-                 backend._scp_task.cancelled())
     result = await asyncio.gather(*tasks, return_exceptions=True)
-    logger.info('all tasks ended, stopping event loop, %s', result)
-    shutdown_event.set()
+    logger.debug('results of all cancelled tasks: %s', result)
+    logger.info('stopping event loop')
+    loop.stop()
 
-def kill_app(sig, loop, backend, mirror_api, shutdown_event):
-    def _stop_loop(loop, sd_event, timeout=100):
-        logger = logging.getLogger(LOGGER)
-        logger.debug('in _stop_loop, waiting')
-        sd_event.wait(timeout=timeout)
-        logger.debug('finished waiting, ending loop')
-        loop.stop()
-
-    asyncio.ensure_future(shutdown(signal.SIGINT,
-                                   loop,
+def exit_handler(sig, loop, backend, mirror_api):
+    logger = logging.getLogger(LOGGER)
+    logger.info('received %s, scheduling shutdown', sig)
+    asyncio.ensure_future(shutdown(loop,
                                    backend,
-                                   mirror_api,
-                                   shutdown_event))
-    shutdown_thread = threading.Thread(target=_stop_loop,
-                                       args=(loop, shutdown_event))
-    shutdown_thread.daemon = True
-    shutdown_thread.start()
+                                   mirror_api))
 
 
 def main():
@@ -332,37 +330,26 @@ def main():
     mirror_api = MirrorAPI(loop=loop, backend=backend,
                            port=configs['http_port'],
                            host=configs['http_host'])
-    shutdown_event = threading.Event()
-    loop.add_signal_handler(signal.SIGINT, functools.partial(kill_app,
-                                                             signal.SIGINT,
-                                                             loop,
-                                                             backend,
-                                                             mirror_api,
-                                                             shutdown_event))
+    for signame in ['SIGTERM']:
+        loop.add_signal_handler(getattr(signal, signame),
+                                functools.partial(exit_handler,
+                                                  signame,
+                                                  loop,
+                                                  backend,
+                                                  mirror_api))
 
 
-# loop.add_signal_handler(signal.SIGINT,
-                            # functools.partial(asyncio.ensure_future,
-                                              # shutdown(signal.SIGINT,
-                                                       # loop,
-                                                       # backend,
-                                                       # mirror_api,
-                                                       # shutdown_event
-#    loop.add_signal_handler(signal.SIGUSR1, stop_loop, signal.SIGUSR1, loop)
-#    loop.add_signal_handler(signal.SIGUSR1, stop_loop, signal.SIGUSR1, loop)
     loop.run_until_complete(mirror_api.init_server())
     backend.run()
     try:
-        loop.set_debug(enabled=True)
-        logging.basicConfig(level=logging.DEBUG)
         logger.info('starting event loop')
         loop.run_forever()
-    except Exception:
-        logger.exception('caught exception')
+    except:
+        logger.exception('fatal exception')
         raise
     finally:
-        logger.info('shutting down event loop')
         loop.close()
+        logger.info('exiting')
 
 
 if __name__ == '__main__':
