@@ -117,7 +117,7 @@ class Backend(object):
         self.last_ts = -1
         self._scp_task = None
         self._cancel_event = threading.Event()
-        self._executor = ThreadPoolExecutor(max_workers=5)
+        self._executor = ThreadPoolExecutor(max_workers=1)
 
     def run(self):
         self._scp_task = self.loop.run_in_executor(
