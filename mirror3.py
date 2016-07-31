@@ -17,6 +17,7 @@ from paramiko.ssh_exception import SSHException
 
 LOGGER = 'mirror_checker'
 
+
 class MirrorAPI(object):
     def __init__(self, loop, backend, host='localhost', port=8080):
         self.loop = loop
@@ -25,26 +26,21 @@ class MirrorAPI(object):
         self.port = port
         self.app = web.Application(loop=loop)
         self.handler = self.Hanlders(self.backend)
-        self.app.router.add_route('GET',
-                                  '{0}/{1}'.format(
-                                      self.backend.configs['http_prefix'],
-                                      '{mirror_name}'
-                                  ),
+        self.app.router.add_route('GET', '{0}/{1}'.format(
+            self.backend.configs['http_prefix'], '{mirror_name}'),
                                   self.handler.mirror)
         self.app.router.add_route('GET', self.backend.configs['http_prefix'],
                                   self.handler.all_mirrors)
-        self.app.router.add_route('GET',
-                                  '{0}/{1}'.format(
-                                      self.backend.configs['http_prefix'],
-                                      self.backend.configs['yum_mirror_request']
-                                  ), self.handler.yum_mirrorlist)
+        self.app.router.add_route('GET', '{0}/{1}'.format(
+            self.backend.configs['http_prefix'],
+            self.backend.configs['yum_mirror_request']),
+                                  self.handler.yum_mirrorlist)
 
         self.srv = None
 
     async def init_server(self):
         self.srv = await self.loop.create_server(self.app.make_handler(),
-                                                 self.host,
-                                                 self.port)
+                                                 self.host, self.port)
         return self.srv
 
     def shutdown(self):
@@ -65,45 +61,36 @@ class MirrorAPI(object):
                 else:
                     seconds = int(time.time()) - mirror.max_ts
                     res = {'in_seconds': seconds,
-                           'in_minutes': round(seconds/60, 2),
-                           'in_hours': round(seconds/60/60, 2)}
+                           'in_minutes': round(seconds / 60, 2),
+                           'in_hours': round(seconds / 60 / 60, 2)}
                     result[mirror.url] = res
-            return web.Response(
-                body=json.dumps({'mirrors': result},
-                                sort_keys=True,
-                                indent=4).encode('utf-8'))
-
+            return web.Response(body=json.dumps(
+                {'mirrors': result}, sort_keys=True, indent=4).encode('utf-8'))
 
         async def mirror(self, request):
             return web.Response(text="single_mirror")
 
         async def yum_mirrorlist(self, request):
-            results = ('{0}/{1}\n'.format(mirror.url,
-                                          self.backend.configs['yum_suffix'])
-                       for mirror in self.backend.mirrors.values() if
-                       mirror.max_ts > 0 and
-                       (int(time.time()) - mirror.max_ts <
-                        self.backend.configs['yum_threshold'])
-                      )
+            results = (
+                '{0}/{1}\n'.format(mirror.url,
+                                   self.backend.configs['yum_suffix'])
+                for mirror in self.backend.mirrors.values()
+                if mirror.max_ts > 0 and (int(time.time(
+                )) - mirror.max_ts < self.backend.configs['yum_threshold']))
             results = (result.replace('@VERSION@',
                                       request.match_info['version'])
-                       .replace('@DIST@',
-                                request.match_info['dist'])
+                       .replace('@DIST@', request.match_info['dist'])
                        for result in results)
-            return web.Response(
-                body=''.join(results).encode('utf-8'))
-
+            return web.Response(body=''.join(results).encode('utf-8'))
 
 
 class Backend(object):
-
     def __init__(self, loop, configs):
         self.loop = loop
         self.configs = configs
         if not configs.get('dirs', False):
             self.configs['dirs'] = self._generate_dirs()
-        self.configs['dirs'] = ['/'.join([dir,
-                                          self.configs['ts_fname']])
+        self.configs['dirs'] = ['/'.join([dir, self.configs['ts_fname']])
                                 for dir in self.configs['dirs']]
         self.mirrors = self._build_mirrors()
         self.last_ts = -1
@@ -112,11 +99,11 @@ class Backend(object):
         self._executor = ThreadPoolExecutor(max_workers=5)
 
     def run(self):
-        self._scp_task = self.loop.run_in_executor(self._executor,
-                                                   func=functools.partial(
-                                                       self._send_scp,
-                                                       self.configs,
-                                                       self._cancel_event))
+        self._scp_task = self.loop.run_in_executor(
+            self._executor,
+            func=functools.partial(self._send_scp, self.configs,
+                                   self._cancel_event))
+
     async def shutdown(self):
         if self._scp_task:
             self._cancel_event.set()
@@ -131,12 +118,11 @@ class Backend(object):
         for mirror in self.mirrors.values():
             mirror.shutdown()
 
-
-
     def _build_mirrors(self):
         mirrors = {}
         for mirror in self.configs['mirrors']:
-            mirror = Mirror(loop=self.loop, files=self.configs['dirs'], **mirror)
+            mirror = Mirror(
+                loop=self.loop, files=self.configs['dirs'], **mirror)
             mirrors[mirror.url] = mirror
         return mirrors
 
@@ -149,8 +135,7 @@ class Backend(object):
                 with self._get_sftp(self.configs['ssh_args']) as sftp:
                     begin = time.time()
                     for file in configs['dirs']:
-                        path = '/'.join([configs['remote_path'],
-                                         file.strip()])
+                        path = '/'.join([configs['remote_path'], file.strip()])
                         with sftp.open(path, 'w') as remote_file:
                             timestamp = int(time.time())
                             remote_file.write(str(timestamp))
@@ -159,14 +144,12 @@ class Backend(object):
                     logger.info('sent %s files to %s:%s, took: %.4fs',
                                 len(self.configs['dirs']),
                                 self.configs['ssh_args']['hostname'],
-                                self.configs['remote_path'],
-                                (end-begin))
+                                self.configs['remote_path'], (end - begin))
                 cancel_event.wait(configs['stamp_interval'])
             except SSHException:
                 logger.exception('error sending files over SCP')
                 if cancel_event.is_set():
                     raise
-
 
     def _generate_dirs(self):
         raise NotImplementedError
@@ -189,7 +172,8 @@ class Backend(object):
         ssh_proxy = None
         if proxy_cmd:
             proxy_cmd = proxy_cmd.replace('%h', local_sshargs['hostname'])
-            proxy_cmd = proxy_cmd.replace('%p', local_sshargs.get('port', '22'))
+            proxy_cmd = proxy_cmd.replace('%p', local_sshargs.get('port',
+                                                                  '22'))
             ssh_proxy = paramiko.ProxyCommand(proxy_cmd)
         ssh.connect(sock=ssh_proxy, **local_sshargs)
         yield ssh
@@ -228,7 +212,7 @@ class Mirror(object):
                 with aiohttp.ClientSession(loop=self.loop) as session:
                     results = await asyncio.gather(
                         *[self._get_file(session, '/'.join([self.url, file]))
-                          for file in  self.files],
+                          for file in self.files],
                         return_exceptions=True)
                     for result in results:
                         if isinstance(result, asyncio.CancelledError):
@@ -242,14 +226,12 @@ class Mirror(object):
                                                url)
                             else:
                                 self.status[url] = timestamp
-                                self.max_ts = max(int(self.max_ts),
-                                                  int(timestamp))
+                                self.max_ts = max(
+                                    int(self.max_ts), int(timestamp))
                                 fetched = fetched + 1
                 end = time.time()
-                logger.info('fetched %s/%s files from %s, took: %.4fs', fetched,
-                            len(self.files),
-                            self.url,
-                            end - begin)
+                logger.info('fetched %s/%s files from %s, took: %.4fs',
+                            fetched, len(self.files), self.url, end - begin)
 
                 await asyncio.sleep(self.interval)
             except asyncio.CancelledError:
@@ -298,46 +280,46 @@ def load_config(config_fname):
     configs.update(configs_yaml)
     return configs
 
+
 async def shutdown(loop, backend, mirror_api):
     logger = logging.getLogger(LOGGER)
     mirror_api.shutdown()
     await backend.shutdown()
-    tasks = [task for task in asyncio.Task.all_tasks() if task is not
-             asyncio.tasks.Task.current_task()]
+    tasks = [task for task in asyncio.Task.all_tasks()
+             if task is not asyncio.tasks.Task.current_task()]
     result = await asyncio.gather(*tasks, return_exceptions=True)
     logger.debug('results of all cancelled tasks: %s', result)
     logger.info('stopping event loop')
     loop.stop()
 
+
 def exit_handler(sig, loop, backend, mirror_api):
     logger = logging.getLogger(LOGGER)
     logger.info('received %s, scheduling shutdown', sig)
-    asyncio.ensure_future(shutdown(loop,
-                                   backend,
-                                   mirror_api))
+    asyncio.ensure_future(shutdown(loop, backend, mirror_api))
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('-c', '--config_file', type=str, default='mirrors.yaml')
+    parser.add_argument(
+        '-c', '--config_file', type=str, default='mirrors.yaml')
     args = parser.parse_args()
     configs = load_config(args.config_file)
     logger = setup_logger(configs['log_file'], configs['log_level'])
-    flat_config = '\n'.join('\t{}: {}'.format(key, val) for key, val in configs.items())
+    flat_config = '\n'.join('\t{}: {}'.format(key, val)
+                            for key, val in configs.items())
     logger.info('loaded configuration:\n %s', flat_config)
     loop = asyncio.get_event_loop()
     backend = Backend(loop=loop, configs=configs['backends'][0].copy())
-    mirror_api = MirrorAPI(loop=loop, backend=backend,
-                           port=configs['http_port'],
-                           host=configs['http_host'])
+    mirror_api = MirrorAPI(
+        loop=loop,
+        backend=backend,
+        port=configs['http_port'],
+        host=configs['http_host'])
     for signame in ['SIGTERM']:
-        loop.add_signal_handler(getattr(signal, signame),
-                                functools.partial(exit_handler,
-                                                  signame,
-                                                  loop,
-                                                  backend,
-                                                  mirror_api))
-
+        loop.add_signal_handler(
+            getattr(signal, signame), functools.partial(
+                exit_handler, signame, loop, backend, mirror_api))
 
     loop.run_until_complete(mirror_api.init_server())
     backend.run()
