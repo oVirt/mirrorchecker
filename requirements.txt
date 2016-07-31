@@ -1,0 +1,3 @@
+aiohttp==0.22.1
+paramiko==2.0.2
+PyYAML==3.11
