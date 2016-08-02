@@ -3,6 +3,7 @@ import time
 import json
 import argparse
 import logging
+from logging.handlers import WatchedFileHandler
 import threading
 import asyncio
 import signal
@@ -292,7 +293,7 @@ def setup_logger(log_file, log_level):
         '::%(lineno)d::(%(funcName)s) %(message)s'
     )
     fmt = logging.Formatter(log_formatter)
-    file_h = logging.FileHandler(log_file)
+    file_h = WatchedFileHandler(log_file)
     file_h.setLevel(level)
     file_h.setFormatter(fmt)
     logger.setLevel(level)
