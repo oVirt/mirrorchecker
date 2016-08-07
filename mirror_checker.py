@@ -48,7 +48,12 @@ class MirrorAPI(object):
 
     async def init_server(self):
         self.srv = await self.loop.create_server(
-            self.app.make_handler(), self.host, self.port
+            self.app.make_handler(
+                logger=logging.getLogger(LOGGER),
+                access_log=logging.getLogger(LOGGER)
+            ),
+            self.host,
+            self.port
         )
         return self.srv
 
@@ -153,7 +158,6 @@ class Backend(object):
 
     def _send_scp(self, configs, cancel_event):
         logger = logging.getLogger(LOGGER)
-
         while not cancel_event.is_set():
             try:
 
