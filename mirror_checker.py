@@ -1,3 +1,4 @@
+import sys
 import functools
 import time
 import json
@@ -282,33 +283,31 @@ class Mirror(object):
                 logger.exception('error fetching files from %s', self.url)
 
 
-def setup_logger(log_file, log_level):
-    #TO-DO setup none-blocking logging with queue
+def setup_logger(configs):
     logger = logging.getLogger(LOGGER)
-    level = logging.INFO
-    if log_level == 'debug':
-        level = logging.DEBUG
-    elif log_level == 'error':
-        level = logging.ERROR
-    elif log_level == 'warning':
-        level = logging.WARNING
+    level = getattr(logging, configs['level'])
     log_formatter = (
         '%(threadName)s::%(levelname)s::%(asctime)s'
         '::%(lineno)d::(%(funcName)s) %(message)s'
     )
     fmt = logging.Formatter(log_formatter)
-    file_h = WatchedFileHandler(log_file)
-    file_h.setLevel(level)
-    file_h.setFormatter(fmt)
     logger.setLevel(level)
-    logger.addHandler(file_h)
+    if configs.get('file', False):
+        file_h = WatchedFileHandler(configs.get('file'))
+        file_h.setLevel(level)
+        file_h.setFormatter(fmt)
+        logger.addHandler(file_h)
+    else:
+        std_h = logging.StreamHandler(sys.stdout)
+        std_h.setLevel(level)
+        std_h.setFormatter(fmt)
+        logger.addHandler(std_h)
     return logger
 
 
 def load_config(config_fname):
     defaults = {
-        'log_level': 'debug',
-        'log_file': 'mirror_checker.log',
+        'logging': {'file': None, 'level': 'INFO'},
         'http_port': 8080,
         'http_host': 'localhost',
         'http_prefix': 'api',
@@ -352,7 +351,7 @@ def main():
     )
     args = parser.parse_args()
     configs = load_config(args.config_file)
-    logger = setup_logger(configs['log_file'], configs['log_level'])
+    logger = setup_logger(configs['logging'])
     flat_config = '\n'.join(
         '\t{}: {}'.format(key, val) for key, val in configs.items()
     )
