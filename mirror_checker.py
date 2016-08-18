@@ -8,6 +8,7 @@ from logging.handlers import WatchedFileHandler
 import threading
 import asyncio
 import signal
+import pprint
 from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor
 
@@ -307,7 +308,8 @@ def setup_logger(configs):
 
 def load_config(config_fname):
     defaults = {
-        'logging': {'file': None, 'level': 'INFO'},
+        'logging': {'file': None,
+                    'level': 'INFO'},
         'http_port': 8080,
         'http_host': 'localhost',
         'http_prefix': 'api',
@@ -352,10 +354,7 @@ def main():
     args = parser.parse_args()
     configs = load_config(args.config_file)
     logger = setup_logger(configs['logging'])
-    flat_config = '\n'.join(
-        '\t{}: {}'.format(key, val) for key, val in configs.items()
-    )
-    logger.info('loaded configuration:\n %s', flat_config)
+    logger.info('loaded configuration:\n%s', pprint.pformat(configs, depth=10))
     loop = asyncio.get_event_loop()
     backend = Backend(loop=loop, configs=configs['backends'][0].copy())
     mirror_api = MirrorAPI(
