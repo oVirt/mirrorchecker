@@ -90,6 +90,20 @@ class MirrorAPI(object):
             )
 
         async def mirror(self, request):
+            mirror_req = request.match_info['mirror_name']
+            mirror_req = mirror_req.replace('_', '/')
+            mirror_req = 'http://{0}'.format(mirror_req)
+            mirror = self.backend.mirrors.get(mirror_req, False)
+            if mirror:
+                seconds = int(time.time()) - mirror.max_ts
+                return web.Response(
+                    body=json.dumps(
+                        {mirror_req: seconds}, indent=4
+                    ).encode('utf-8')
+                )
+            else:
+                return aiohttp.web.HTTPNotFound()
+
             return web.Response(text="single_mirror")
 
         async def yum_mirrorlist(self, request):
