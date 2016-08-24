@@ -421,6 +421,20 @@ def load_config(config_fname):
     try:
         with open(config_fname, 'r') as config_file:
             configs_yaml = yaml.load(config_file)
+            if configs_yaml['backends'][0].get('mirrors_file'):
+                if configs_yaml['backends'][0].get('mirrors'):
+                    print(
+                        'duplicate definition of mirrors, using mirrors_file'
+                    )
+                    configs_yaml['backends'][0].pop('mirrors')
+                with open(
+                    configs_yaml['backends'][0].get('mirrors_file'), 'r'
+                ) as mirror_file:
+                    mirrors = mirror_file.readlines()
+                    configs_yaml['backends'][0]['mirrors'] = [
+                        {'url': url.strip()} for url in mirrors
+                    ]
+
     except IOError:
         print('failed to open %s', config_fname)
         raise
