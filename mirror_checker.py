@@ -1,22 +1,22 @@
-import sys
-import functools
-import time
-import json
 import argparse
+import asyncio
+import functools
+import json
 import logging
 from logging.handlers import WatchedFileHandler
-import threading
-import asyncio
-import signal
 import pprint
-from contextlib import contextmanager
+import signal
+import sys
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 
-import yaml
 import aiohttp
 from aiohttp import web
 import paramiko
 from paramiko.ssh_exception import SSHException
+import yaml
 
 LOGGER = 'mirror_checker'
 
@@ -101,12 +101,14 @@ class MirrorAPI(object):
                         {mirror_req: seconds}, indent=4
                     ).encode('utf-8')
                 )
-            else:
-                return aiohttp.web.HTTPNotFound()
+            return aiohttp.web.HTTPNotFound()
 
-            return web.Response(text="single_mirror")
 
         async def yum_mirrorlist(self, request):
+            """yum_mirrorlist
+
+            :param request:
+            """
             results = (
                 '{0}/{1}\n'.format(
                     mirror.url, self.backend.configs['yum_suffix']
@@ -125,8 +127,21 @@ class MirrorAPI(object):
 
 
 class Backend(object):
+    """represents a source site from which mirror sites pull data
+
+    This is basically a directory on a remote site, that is reachable via SSH.
+    Under the directories defined in the configs['dirs'] list, a timestamp
+    will be uploaded on each interval.
+    """
 
     def __init__(self, loop, configs):
+        """__init__
+
+        Args:
+               loop (asyncio.BaseEventLoop): event loop
+               configs (dict): configurations
+
+        """
         self.loop = loop
         self.configs = configs
         if not configs.get('dirs', False):
@@ -142,6 +157,7 @@ class Backend(object):
         self._executor = ThreadPoolExecutor(max_workers=1)
 
     def run(self):
+        """start sending timestamps over SCP in a new thread"""
         self._scp_task = self.loop.run_in_executor(
             self._executor,
             func=functools.partial(
@@ -150,6 +166,7 @@ class Backend(object):
         )
 
     async def shutdown(self):
+        """attempt to close SCP thread, and cancel all mirroring site tasks"""
         if self._scp_task:
             self._cancel_event.set()
             try:
@@ -164,6 +181,7 @@ class Backend(object):
             mirror.shutdown()
 
     def _build_mirrors(self):
+        """_build_mirrors"""
         mirrors = {}
         for mirror in self.configs['mirrors']:
             mirror = Mirror(
@@ -173,6 +191,13 @@ class Backend(object):
         return mirrors
 
     def _send_scp(self, configs, cancel_event):
+        """Send timestamps over SCP
+
+        Args:
+               configs (dict): backend config
+               cancel_event (threading.Event): runs until the event is set
+
+        """
         logger = logging.getLogger(LOGGER)
         while not cancel_event.is_set():
             try:
@@ -206,6 +231,14 @@ class Backend(object):
 
     @contextmanager
     def _get_sftp(self, ssh_args):
+        """a safe wrapper around paramiko.sftp_client.SFTPClient
+
+        Args:
+               ssh_args (dict): ssh arguments for SSHClient.connect() method
+
+        Returns:
+            paramiko.sftp_client.SFTPClient: a connected SFTP client
+        """
         with self._get_ssh(ssh_args) as ssh:
             sftp = ssh.open_sftp()
             yield sftp
@@ -213,6 +246,15 @@ class Backend(object):
 
     @contextmanager
     def _get_ssh(self, ssh_args):
+        """a safe wrapper around paramiko.SSHClient
+
+
+        Args:
+               ssh_args (dict): ssh arguments for SSHClient.connect() method
+
+        Returns:
+             paramiko.client.SSHClient: a connected SSHClient
+        """
         local_sshargs = dict(ssh_args)
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -225,15 +267,34 @@ class Backend(object):
             )
             ssh_proxy = paramiko.ProxyCommand(proxy_cmd)
         ssh.connect(sock=ssh_proxy, **local_sshargs)
-        yield ssh
-        ssh.close()
-        if ssh_proxy:
-            ssh_proxy.close()
+        try:
+            yield ssh
+        finally:
+            ssh.close()
+            if ssh_proxy:
+                ssh_proxy.close()
 
 
 class Mirror(object):
+    """A Mirror site syncronization status
+
+    Represents a mirror site status. Pulls timestamps via http periodically,
+    keeping max(current_time - timestamp)
+
+    """
+
+
 
     def __init__(self, loop, files, url, interval=90):
+        """__init__
+
+        Args:
+               loop (asyncio.BaseEventLoop): event loop
+               files (list): list of timestamp files
+               url (str): mirror site http
+               interval (float): sample interval
+
+        """
         self.loop = loop
         self.files = files
         self.url = url
@@ -243,9 +304,19 @@ class Mirror(object):
         self.max_ts = -1
 
     def shutdown(self):
+        """cancel the sampling task"""
         self.task.cancel()
 
     async def _get_file(self, session, url):
+        """downloads a URL and converts it to text
+
+        Args:
+               session (aiohttp.ClientSession): web session
+               url (str): url to collect
+
+        Returns:
+            tuple: url and text response
+        """
         with aiohttp.Timeout(10):
             async with session.get(url) as response:
                 timestamp = await response.text()
@@ -254,6 +325,7 @@ class Mirror(object):
                 return (url, timestamp)
 
     async def _aggr_files(self):
+        """trigger coroutines to update timestamps and update maximal one"""
         logger = logging.getLogger(LOGGER)
         while True:
             try:
@@ -299,6 +371,15 @@ class Mirror(object):
 
 
 def setup_logger(configs):
+    """setup_logger
+
+    Args:
+           configs (dict): logging configuration
+
+
+    Returns:
+        logging.logger: the configured logger
+    """
     logger = logging.getLogger(LOGGER)
     level = getattr(logging, configs['level'])
     log_formatter = (
@@ -321,6 +402,14 @@ def setup_logger(configs):
 
 
 def load_config(config_fname):
+    """Load configuration from yaml
+
+    Args:
+           config_fname (str): yaml configuration file path
+
+    Returns:
+        dict: default configurations merged with yaml
+    """
     defaults = {
         'logging': {'file': None,
                     'level': 'INFO'},
@@ -341,6 +430,17 @@ def load_config(config_fname):
 
 
 async def shutdown(loop, backend, mirror_api):
+    """Attempt to cancel all tasks and close loop
+
+
+    Args:
+           loop (asyncio.BaseEventLoop): event loop
+           backend (Backend): Backend object
+           mirror_api (MirrorAPI): MirrorAPI object
+
+    Returns:
+        None: None
+    """
     logger = logging.getLogger(LOGGER)
     mirror_api.shutdown()
     await backend.shutdown()
@@ -355,12 +455,23 @@ async def shutdown(loop, backend, mirror_api):
 
 
 def exit_handler(sig, loop, backend, mirror_api):
+    """schedule the shutdown coroutine from signal
+
+
+   Args:
+           sig (int): signal number
+           loop (asyncio.BaseEventLoop): event loop
+           backend (Backend): Backend object
+           mirror_api (MirrorAPI): MirrorAPI object
+
+    """
     logger = logging.getLogger(LOGGER)
     logger.info('received %s, scheduling shutdown', sig)
     asyncio.ensure_future(shutdown(loop, backend, mirror_api))
 
 
 def main():
+    """main"""
     parser = argparse.ArgumentParser()
     parser.add_argument(
         '-c', '--config_file', type=str, default='mirrors.yaml'
