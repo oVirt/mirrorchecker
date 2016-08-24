@@ -7,6 +7,7 @@ from logging.handlers import WatchedFileHandler
 import pprint
 import signal
 import sys
+import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -42,7 +43,7 @@ class MirrorAPI(object):
         self.app.router.add_route(
             'GET', '{0}/{1}'.format(
                 self.backend.configs['http_prefix'],
-                self.backend.configs['yum_mirror_request']
+                self.backend.configs['yum_request']
             ), self.handler.yum_mirrorlist
         )
 
@@ -103,24 +104,25 @@ class MirrorAPI(object):
                 )
             return aiohttp.web.HTTPNotFound()
 
-
         async def yum_mirrorlist(self, request):
-            """yum_mirrorlist
 
-            :param request:
-            """
             results = (
                 '{0}/{1}\n'.format(
-                    mirror.url, self.backend.configs['yum_suffix']
+                    mirror.url, self.backend.configs['yum_response']
                 ) for mirror in self.backend.mirrors.values()
                 if mirror.max_ts > 0 and (
                     int(time.time()) - mirror.max_ts <
                     self.backend.configs['yum_threshold']
                 )
             )
+
+            replace = {
+                '{{{0}}}'.format(k): v
+                for k, v in request.match_info.items()
+            }
+            pattern = re.compile("|".join(replace.keys()))
             results = (
-                result.replace('@VERSION@', request.match_info['version'])
-                .replace('@DIST@', request.match_info['dist'])
+                pattern.sub(lambda m: replace[m.group(0)], result)
                 for result in results
             )
             return web.Response(body=''.join(results).encode('utf-8'))
@@ -276,14 +278,12 @@ class Backend(object):
 
 
 class Mirror(object):
-    """A Mirror site syncronization status
+    """A Mirror site synchronization status
 
     Represents a mirror site status. Pulls timestamps via http periodically,
     keeping max(current_time - timestamp)
 
     """
-
-
 
     def __init__(self, loop, files, url, interval=90):
         """__init__
@@ -455,7 +455,7 @@ async def shutdown(loop, backend, mirror_api):
 
 
 def exit_handler(sig, loop, backend, mirror_api):
-    """schedule the shutdown coroutine from signal
+    """Schedule the shutdown coroutine from signal
 
 
    Args:
