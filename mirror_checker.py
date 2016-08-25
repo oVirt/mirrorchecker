@@ -6,19 +6,19 @@ import json
 import logging
 from logging.handlers import WatchedFileHandler
 import pprint
+import re
 import signal
 import sys
-import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 
 import aiohttp
-from aiohttp import web
 import paramiko
-from paramiko.ssh_exception import SSHException
 import yaml
+from aiohttp import web
+from paramiko.ssh_exception import SSHException
 
 LOGGER = 'mirror_checker'
 
@@ -245,7 +245,6 @@ class Backend(object):
     def _get_ssh(self, ssh_args):
         """a safe wrapper around paramiko.SSHClient
 
-
         Args:
                ssh_args (dict): ssh arguments for SSHClient.connect() method
 
@@ -272,6 +271,27 @@ class Backend(object):
                 ssh_proxy.close()
 
     def filter(self, custom_filters=[], custom_whitelist=[]):
+        """apply filters to the mirrors and return the result
+        all filters are in the form: lambda mirror: ...., where 'mirror' is
+        expected to be a Mirror object. The default filters:
+        include all mirrors marked as 'whitelist' regardless of thier state,
+        exclude unreachable mirrors,
+        exclude mirrors whose maximal timestamp difference from now is above
+        'yum_threshold' parameter.
+
+        mirror sites who matched ONE of the whitelist filters, will always
+        be returned.
+
+
+           Args:
+               custom_filters (list): a list of lambda function to append
+               to the filters(logical OR)
+               custom_whitelist (str): a list of lambda function to append
+               to the whitelist filters(logical ANY)
+
+            Returns:
+                list: list of Mirror objects
+        """
         return self._filter(self.mirrors, custom_filters, custom_whitelist)
 
     def _filter(self, mirrors, custom_filters=[], custom_whitelist=[]):
