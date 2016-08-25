@@ -15,10 +15,10 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 
 import aiohttp
-import paramiko
-import yaml
 from aiohttp import web
+import paramiko
 from paramiko.ssh_exception import SSHException
+import yaml
 
 LOGGER = 'mirror_checker'
 
