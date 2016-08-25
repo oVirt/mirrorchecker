@@ -285,7 +285,7 @@ class Mirror(object):
 
     """
 
-    def __init__(self, loop, files, url, interval=90, slow_start=2):
+    def __init__(self, loop, files, url, interval=60, slow_start=2):
         """__init__
 
         Args:
@@ -305,6 +305,7 @@ class Mirror(object):
         self.max_ts = -1
         self.slow_start = slow_start
         self.max_cache = [-1] * self.slow_start
+        self.reachable = True
 
     def shutdown(self):
         """cancel the sampling task"""
@@ -333,6 +334,7 @@ class Mirror(object):
         while True:
             try:
                 fetched = 0
+                errors = 0
                 begin = time.time()
                 with aiohttp.ClientSession(loop=self.loop) as session:
                     results = await asyncio.gather(
@@ -346,8 +348,18 @@ class Mirror(object):
                     for result in results:
                         if isinstance(result, asyncio.CancelledError):
                             raise asyncio.CancelledError(result.args)
-                        if isinstance(result, Exception):
-                            logger.warning('failed fetching: %s', repr(result))
+                        elif isinstance(
+                            result, (
+                                aiohttp.errors.ClientConnectionError,
+                                asyncio.TimeoutError
+                            )
+                        ):
+                            logger.warning(
+                                'unable to connect to %s: %s', self.url,
+                                repr(result)
+                            )
+                            errors = errors + 1
+
                         else:
                             url, timestamp = result
                             if not timestamp:
@@ -372,12 +384,20 @@ class Mirror(object):
                     'fetched %s/%s files from %s, took: %.4fs', fetched,
                     len(self.files), self.url, end - begin
                 )
+                if errors == len(self.files) and self.reachable is not False:
+                    logger.warning('marking %s as unreachable', self.url)
+                    self.reachable = False
+                elif errors < len(self.files) and self.reachable is not True:
+                    logger.info('marking %s as reachable', self.url)
+                    self.reachable = True
 
                 await asyncio.sleep(self.interval)
             except asyncio.CancelledError:
                 raise
             except:
-                logger.exception('error fetching files from %s', self.url)
+                logger.exception(
+                    'fatal exception fetching files from %s', self.url
+                )
 
 
 def setup_logger(configs):
