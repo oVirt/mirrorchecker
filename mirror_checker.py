@@ -285,7 +285,7 @@ class Mirror(object):
 
     """
 
-    def __init__(self, loop, files, url, interval=90):
+    def __init__(self, loop, files, url, interval=90, slow_start=2):
         """__init__
 
         Args:
@@ -293,6 +293,7 @@ class Mirror(object):
                files (list): list of timestamp files
                url (str): mirror site http
                interval (float): sample interval
+               slow_start (int): number of compares to keep status uninitialized
 
         """
         self.loop = loop
@@ -302,6 +303,8 @@ class Mirror(object):
         self.status = {}
         self.task = asyncio.ensure_future(self._aggr_files(), loop=self.loop)
         self.max_ts = -1
+        self.slow_start = slow_start
+        self.max_cache = [-1] * self.slow_start
 
     def shutdown(self):
         """cancel the sampling task"""
@@ -352,12 +355,19 @@ class Mirror(object):
                                     'failed fetching %s, not found', url
                                 )
                             else:
-                                self.status[url] = timestamp
-                                self.max_ts = max(
-                                    int(self.max_ts), int(timestamp)
-                                )
+                                self.status[url] = int(timestamp)
                                 fetched = fetched + 1
                 end = time.time()
+                local_max_ts = max(
+                    [v for v in self.status.values()], default=-1
+                )
+                if self.slow_start > 0:
+                    if self.max_cache[self.slow_start - 1] != local_max_ts:
+                        self.slow_start = self.slow_start - 1
+                        self.max_cache[self.slow_start - 1] = local_max_ts
+                else:
+                    self.max_ts = local_max_ts
+
                 logger.info(
                     'fetched %s/%s files from %s, took: %.4fs', fetched,
                     len(self.files), self.url, end - begin
