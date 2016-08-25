@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import functools
+import itertools
 import json
 import logging
 from logging.handlers import WatchedFileHandler
@@ -105,17 +106,11 @@ class MirrorAPI(object):
             return aiohttp.web.HTTPNotFound()
 
         async def yum_mirrorlist(self, request):
-
             results = (
                 '{0}/{1}\n'.format(
                     mirror.url, self.backend.configs['yum_response']
-                ) for mirror in self.backend.mirrors.values()
-                if mirror.max_ts > 0 and (
-                    int(time.time()) - mirror.max_ts <
-                    self.backend.configs['yum_threshold']
-                )
+                ) for mirror in self.backend.filter()
             )
-
             replace = {
                 '{{{0}}}'.format(k): v
                 for k, v in request.match_info.items()
@@ -276,6 +271,35 @@ class Backend(object):
             if ssh_proxy:
                 ssh_proxy.close()
 
+    def filter(self, custom_filters=[], custom_whitelist=[]):
+        return self._filter(self.mirrors, custom_filters, custom_whitelist)
+
+    def _filter(self, mirrors, custom_filters=[], custom_whitelist=[]):
+        default_whitelist = [lambda mirror: mirror.whitelist]
+        default_filters = [
+            lambda mirror: mirror.reachable,
+            lambda mirror: int(time.time()) - mirror.max_ts < self.configs['yum_threshold']
+        ]
+
+        filters = list(itertools.chain(default_filters, custom_filters))
+        whitelist_filters = list(
+            itertools.chain(default_whitelist, custom_whitelist)
+        )
+
+        def _filter_all(filters, vars):
+            return filter(lambda t: all(f(t) for f in filters), vars)
+
+        def _filter_any(filters, vars):
+            return filter(lambda t: any(f(t) for f in filters), vars)
+
+        whitelist = [
+            mirror
+            for mirror in _filter_any(whitelist_filters, mirrors.values())
+        ]
+        include = [mirror for mirror in _filter_all(filters, mirrors.values())]
+
+        return list(set(whitelist) | set(include))
+
 
 class Mirror(object):
     """A Mirror site synchronization status
@@ -285,7 +309,9 @@ class Mirror(object):
 
     """
 
-    def __init__(self, loop, files, url, interval=60, slow_start=2):
+    def __init__(
+        self, loop, files, url, interval=60, slow_start=2, whitelist=False
+    ):
         """__init__
 
         Args:
@@ -304,6 +330,7 @@ class Mirror(object):
         self.task = asyncio.ensure_future(self._aggr_files(), loop=self.loop)
         self.max_ts = -1
         self.slow_start = slow_start
+        self.whitelist = whitelist
         self.max_cache = [-1] * self.slow_start
         self.reachable = True
 
