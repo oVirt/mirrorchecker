@@ -156,11 +156,10 @@ class MirrorAPI(object):
                 http_prefix: '/mirrors'
                 yum_request: 'yum/mirrorlist-ovirt-{version}-{dist}
                 yum_response: 'ovirt-{version}/rpm/{dist}'
-                yum_threshould: 360
 
             request: http://localhost/mirrors/mirrorslist-ovirt-3.6-el7
-            response: list of mirror sites that were marked as synchronization
-            in the past at most 5 minutes ago:
+            response: list of mirror sites returned by the Backend filter
+            method with {version} and {dist} substituted:
                 http://mirror1.com/pub/ovirt-3.6/rpm/el7
                 http://mirror2.com/pub/linux/ovirt-3.6/rpm/el7
                 ...
@@ -313,7 +312,8 @@ class Backend(object):
     def _get_ssh(self, ssh_args):
         """A safe wrapper around paramiko.SSHClient
 
-        Ensures closing ProxyCommand if used explicitly.
+        Closes ProxyCommand explicitly, if 'proxy_cmd' is used in the
+        ssh arguments.
 
         Args:
                ssh_args (dict): ssh arguments for SSHClient.connect() method
@@ -341,7 +341,7 @@ class Backend(object):
                 ssh_proxy.close()
 
     def filter(self, custom_filters=None, custom_whitelist=None):
-        """Apply filters to the mirrors and return a list of mirrors
+        """Apply filters to the mirrors and return a filtered list of mirrors
 
         Filters are in the form:
             lambda mirror: ....
@@ -350,7 +350,8 @@ class Backend(object):
         Include all mirrors marked as 'whitelist' regardless of their state,
         Exclude unreachable mirrors,
         Exclude mirrors whose maximal timestamp difference from now is above
-        'yum_threshold' parameter.
+        'yum_threshold' parameter,
+        return the union of the exclude and include.
 
         Mirror sites that matched ONE of the 'whitelist' filters, will always
         be returned.
