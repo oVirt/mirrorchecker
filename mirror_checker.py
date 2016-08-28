@@ -24,8 +24,17 @@ LOGGER = 'mirror_checker'
 
 
 class MirrorAPI(object):
+    """MirrorAPI - a webserver serving mirror sites status"""
 
     def __init__(self, loop, backend, host='localhost', port=8080):
+        """__init__
+
+        Args:
+            loop (asyncio.BaseEventLoop): event loop
+            backend (Backend): backend object
+            host (string): hostname to bind
+            port (int): webserver port to bind
+        """
         self.loop = loop
         self.backend = backend
         self.host = host
@@ -51,6 +60,7 @@ class MirrorAPI(object):
         self.srv = None
 
     async def init_server(self):
+        """Initalize the webserver"""
         self.srv = await self.loop.create_server(
             self.app.make_handler(
                 logger=logging.getLogger(LOGGER),
@@ -62,17 +72,33 @@ class MirrorAPI(object):
         return self.srv
 
     def shutdown(self):
+        """Schedule shutdown of the webserver"""
         self.srv.close()
         asyncio.ensure_future(self.srv.wait_closed())
         asyncio.ensure_future(self.app.shutdown())
         asyncio.ensure_future(self.app.cleanup())
 
     class Hanlders(object):
+        """Web handlers for mirror status"""
 
         def __init__(self, backend):
+            """__init__
+            Args:
+                backend (Backend): backend object
+
+            """
             self.backend = backend
 
         async def all_mirrors(self, request):
+            """returns status of all mirror sites last syncronization time
+            in json format.
+
+            Args:
+                request (aiohttp.web.Request):
+
+            Returns:
+                aiohttp.web.Response: response in JSON format
+            """
             result = {}
             for mirror in self.backend.mirrors.values():
                 if mirror.max_ts < 0:
@@ -92,6 +118,19 @@ class MirrorAPI(object):
             )
 
         async def mirror(self, request):
+            """returns a single mirror syncronization status in seconds
+            expected format is the full mirror path with all '/' replaced
+            with '_'. for example:
+            request:    'hostname.com_pub_ovirt_3.6'
+            reply: status for 'http://hostname.com/pub/ovirt/3.6/'
+
+            Args:
+                request (aiohttp.web.Request): mirror hostname and path with all
+                '/' replaced with '_'
+
+            Returns:
+                aiohttp.web.Response: response in JSON
+            """
             mirror_req = request.match_info['mirror_name']
             mirror_req = mirror_req.replace('_', '/')
             mirror_req = 'http://{0}'.format(mirror_req)
@@ -106,6 +145,31 @@ class MirrorAPI(object):
             return aiohttp.web.HTTPNotFound()
 
         async def yum_mirrorlist(self, request):
+            """returns a list of mirrors file, filtered by Backend object
+            filter command.
+            varaibles are subsituted as defined in 'yum_response' and
+            'yum_request' parameters.
+            example:
+            given this configuration:
+                http_prefix: '/mirrors'
+                yum_request: 'yum/mirrorlist-ovirt-{version}-{dist}
+                yum_response: 'ovirt-{version}/rpm/{dist}'
+                yum_threshould: 360
+
+            request: http://localhost/mirrors/mirrorslist-ovirt-3.6-el7
+            response: list of mirror sites that were marked as syncornization
+            in the past at most 5 minutes ago:
+                http://mirror1.com/pub/ovirt-3.6/rpm/el7
+                http://mirror2.com/pub/linux/ovirt-3.6/rpm/el7
+                ...
+
+
+            Args:
+                request (aiohttp.web.Response):
+
+            Returns:
+                aiohttp.web.Response: response in JSON
+            """
             results = (
                 '{0}/{1}\n'.format(
                     mirror.url, self.backend.configs['yum_response']
@@ -221,9 +285,11 @@ class Backend(object):
                     raise
 
     def _generate_dirs(self):
+        """_generate_dirs"""
         raise NotImplementedError
 
     def _discover_dirs(self):
+        """_discover_dirs"""
         raise NotImplementedError
 
     @contextmanager
@@ -270,16 +336,17 @@ class Backend(object):
             if ssh_proxy:
                 ssh_proxy.close()
 
-    def filter(self, custom_filters=[], custom_whitelist=[]):
+    def filter(self, custom_filters=None, custom_whitelist=None):
         """apply filters to the mirrors and return the result
-        all filters are in the form: lambda mirror: ...., where 'mirror' is
-        expected to be a Mirror object. The default filters:
-        include all mirrors marked as 'whitelist' regardless of thier state,
+        filters are in the form:
+            lambda mirror: ....
+        where mirror is a Mirror object. The default filters:
+        include all mirrors marked as 'whitelist' regardless of their state,
         exclude unreachable mirrors,
         exclude mirrors whose maximal timestamp difference from now is above
         'yum_threshold' parameter.
 
-        mirror sites who matched ONE of the whitelist filters, will always
+        mirror sites that matched ONE of the whitelist filters, will always
         be returned.
 
 
@@ -294,23 +361,25 @@ class Backend(object):
         """
         return self._filter(self.mirrors, custom_filters, custom_whitelist)
 
-    def _filter(self, mirrors, custom_filters=[], custom_whitelist=[]):
+    def _filter(self, mirrors, custom_filters=None, custom_whitelist=None):
         default_whitelist = [lambda mirror: mirror.whitelist]
         default_filters = [
             lambda mirror: mirror.reachable,
             lambda mirror: int(time.time()) - mirror.max_ts < self.configs['yum_threshold']
         ]
+        custom_filters = [] if custom_filters is None else custom_filters
+        custom_whitelist = [] if custom_whitelist is None else custom_whitelist
 
         filters = list(itertools.chain(default_filters, custom_filters))
         whitelist_filters = list(
             itertools.chain(default_whitelist, custom_whitelist)
         )
 
-        def _filter_all(filters, vars):
-            return filter(lambda t: all(f(t) for f in filters), vars)
+        def _filter_all(filters, elements):
+            return filter(lambda t: all(f(t) for f in filters), elements)
 
-        def _filter_any(filters, vars):
-            return filter(lambda t: any(f(t) for f in filters), vars)
+        def _filter_any(filters, elements):
+            return filter(lambda t: any(f(t) for f in filters), elements)
 
         whitelist = [
             mirror
