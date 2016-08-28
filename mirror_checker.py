@@ -24,16 +24,16 @@ LOGGER = 'mirror_checker'
 
 
 class MirrorAPI(object):
-    """MirrorAPI - a webserver serving mirror sites status"""
+    """MirrorAPI - A web server serving mirror sites status"""
 
     def __init__(self, loop, backend, host='localhost', port=8080):
-        """__init__
+        """Initialize the web server with a Backend object.
 
         Args:
             loop (asyncio.BaseEventLoop): event loop
             backend (Backend): backend object
-            host (string): hostname to bind
-            port (int): webserver port to bind
+            host (string): host name to bind
+            port (int): web server port to bind
         """
         self.loop = loop
         self.backend = backend
@@ -60,7 +60,7 @@ class MirrorAPI(object):
         self.srv = None
 
     async def init_server(self):
-        """Initalize the webserver"""
+        """Start the web server"""
         self.srv = await self.loop.create_server(
             self.app.make_handler(
                 logger=logging.getLogger(LOGGER),
@@ -72,7 +72,7 @@ class MirrorAPI(object):
         return self.srv
 
     def shutdown(self):
-        """Schedule shutdown of the webserver"""
+        """Schedule shutdown of the web server"""
         self.srv.close()
         asyncio.ensure_future(self.srv.wait_closed())
         asyncio.ensure_future(self.app.shutdown())
@@ -90,8 +90,8 @@ class MirrorAPI(object):
             self.backend = backend
 
         async def all_mirrors(self, request):
-            """returns status of all mirror sites last syncronization time
-            in json format.
+            """Returns status of all mirror sites last synchronization time
+            in JSON format.
 
             Args:
                 request (aiohttp.web.Request):
@@ -118,9 +118,10 @@ class MirrorAPI(object):
             )
 
         async def mirror(self, request):
-            """returns a single mirror syncronization status in seconds
-            expected format is the full mirror path with all '/' replaced
-            with '_'. for example:
+            """Returns a single mirror synchronization status in seconds.
+
+            Expected format is the full mirror path with all '/' replaced
+            with '_'. For example:
             request:    'hostname.com_pub_ovirt_3.6'
             reply: status for 'http://hostname.com/pub/ovirt/3.6/'
 
@@ -145,11 +146,12 @@ class MirrorAPI(object):
             return aiohttp.web.HTTPNotFound()
 
         async def yum_mirrorlist(self, request):
-            """returns a list of mirrors file, filtered by Backend object
+            """Returns a list of mirrors file, filtered by Backend object
             filter command.
-            varaibles are subsituted as defined in 'yum_response' and
+            Variables are substituted as defined in 'yum_response' and
             'yum_request' parameters.
-            example:
+
+            Example:
             given this configuration:
                 http_prefix: '/mirrors'
                 yum_request: 'yum/mirrorlist-ovirt-{version}-{dist}
@@ -157,7 +159,7 @@ class MirrorAPI(object):
                 yum_threshould: 360
 
             request: http://localhost/mirrors/mirrorslist-ovirt-3.6-el7
-            response: list of mirror sites that were marked as syncornization
+            response: list of mirror sites that were marked as synchronization
             in the past at most 5 minutes ago:
                 http://mirror1.com/pub/ovirt-3.6/rpm/el7
                 http://mirror2.com/pub/linux/ovirt-3.6/rpm/el7
@@ -165,7 +167,7 @@ class MirrorAPI(object):
 
 
             Args:
-                request (aiohttp.web.Response):
+                request (aiohttp.web.Response): A mirror list GET request
 
             Returns:
                 aiohttp.web.Response: response in JSON
@@ -188,7 +190,7 @@ class MirrorAPI(object):
 
 
 class Backend(object):
-    """represents a source site from which mirror sites pull data
+    """Represents a source site from which mirror sites pull data
 
     This is basically a directory on a remote site, that is reachable via SSH.
     Under the directories defined in the configs['dirs'] list, a timestamp
@@ -196,7 +198,7 @@ class Backend(object):
     """
 
     def __init__(self, loop, configs):
-        """__init__
+        """Initalize the backend from the configuration dict
 
         Args:
                loop (asyncio.BaseEventLoop): event loop
@@ -218,7 +220,7 @@ class Backend(object):
         self._executor = ThreadPoolExecutor(max_workers=1)
 
     def run(self):
-        """start sending timestamps over SCP in a new thread"""
+        """Start sending timestamps over SCP in a new thread"""
         self._scp_task = self.loop.run_in_executor(
             self._executor,
             func=functools.partial(
@@ -227,7 +229,7 @@ class Backend(object):
         )
 
     async def shutdown(self):
-        """attempt to close SCP thread, and cancel all mirroring site tasks"""
+        """Attempt to close SCP thread, and cancel all mirroring site tasks"""
         if self._scp_task:
             self._cancel_event.set()
             try:
@@ -294,7 +296,7 @@ class Backend(object):
 
     @contextmanager
     def _get_sftp(self, ssh_args):
-        """a safe wrapper around paramiko.sftp_client.SFTPClient
+        """A safe wrapper around paramiko.sftp_client.SFTPClient
 
         Args:
                ssh_args (dict): ssh arguments for SSHClient.connect() method
@@ -309,7 +311,9 @@ class Backend(object):
 
     @contextmanager
     def _get_ssh(self, ssh_args):
-        """a safe wrapper around paramiko.SSHClient
+        """A safe wrapper around paramiko.SSHClient
+
+        Ensures closing ProxyCommand if used explicitly.
 
         Args:
                ssh_args (dict): ssh arguments for SSHClient.connect() method
@@ -337,16 +341,18 @@ class Backend(object):
                 ssh_proxy.close()
 
     def filter(self, custom_filters=None, custom_whitelist=None):
-        """apply filters to the mirrors and return the result
-        filters are in the form:
+        """Apply filters to the mirrors and return a list of mirrors
+
+        Filters are in the form:
             lambda mirror: ....
-        where mirror is a Mirror object. The default filters:
-        include all mirrors marked as 'whitelist' regardless of their state,
-        exclude unreachable mirrors,
-        exclude mirrors whose maximal timestamp difference from now is above
+        Where mirror is a Mirror object. The default filters are:
+
+        Include all mirrors marked as 'whitelist' regardless of their state,
+        Exclude unreachable mirrors,
+        Exclude mirrors whose maximal timestamp difference from now is above
         'yum_threshold' parameter.
 
-        mirror sites that matched ONE of the whitelist filters, will always
+        Mirror sites that matched ONE of the 'whitelist' filters, will always
         be returned.
 
 
@@ -401,14 +407,15 @@ class Mirror(object):
     def __init__(
         self, loop, files, url, interval=60, slow_start=2, whitelist=False
     ):
-        """__init__
+        """Initialize the mirror site object.
 
         Args:
                loop (asyncio.BaseEventLoop): event loop
                files (list): list of timestamp files
-               url (str): mirror site http
+               url (str): mirror site URL
                interval (float): sample interval
-               slow_start (int): number of compares to keep status uninitialized
+               slow_start (int): number of first changes to keep the site still
+               undiscovered.
 
         """
         self.loop = loop
@@ -424,11 +431,11 @@ class Mirror(object):
         self.reachable = True
 
     def shutdown(self):
-        """cancel the sampling task"""
+        """Cancel the sampling task"""
         self.task.cancel()
 
     async def _get_file(self, session, url):
-        """downloads a URL and converts it to text
+        """Downloads a URL and converts it to text
 
         Args:
                session (aiohttp.ClientSession): web session
@@ -445,7 +452,7 @@ class Mirror(object):
                 return (url, timestamp)
 
     async def _aggr_files(self):
-        """trigger coroutines to update timestamps and update maximal one"""
+        """Trigger coroutines to update timestamps and update maximal one"""
         logger = logging.getLogger(LOGGER)
         while True:
             try:
@@ -517,7 +524,7 @@ class Mirror(object):
 
 
 def setup_logger(configs):
-    """setup_logger
+    """Setup logging
 
     Args:
            configs (dict): logging configuration
@@ -526,6 +533,8 @@ def setup_logger(configs):
     Returns:
         logging.logger: the configured logger
     """
+
+    # TO-DO: use logging.config.dictConfig instead
     logger = logging.getLogger(LOGGER)
     level = getattr(logging, configs['level'])
     log_formatter = (
