@@ -559,15 +559,15 @@ def setup_logger(configs):
 
 
 def _load_mirror_txt(mirror_fname):
-    """Load mirrorlist from plain txt file
+    """Load mirrors list from CSV style file
     Args:
         config_fname (str): mirror file name
 
-        expectets the following format:
-
+        expects the following format:
             url='<url>',key1=value1,key2=value2...
+
         URL is mandatory.
-        All varaibles after the '=' are interpolated as Python literals.
+        All variables after the '=' are interpolated as Python literals.
 
 
     Returns:
