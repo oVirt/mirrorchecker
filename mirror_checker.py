@@ -4,6 +4,7 @@ import functools
 import itertools
 import json
 import logging
+import ast
 from logging.handlers import WatchedFileHandler
 import pprint
 import re
@@ -557,6 +558,45 @@ def setup_logger(configs):
     return logger
 
 
+def _load_mirror_txt(mirror_fname):
+    """Load mirrorlist from plain txt file
+    Args:
+        config_fname (str): mirror file name
+
+        expectets the following format:
+
+            url='<url>',key1=value1,key2=value2...
+        URL is mandatory.
+        All varaibles after the '=' are interpolated as Python literals.
+
+
+    Returns:
+        dict: mirrors dict
+    """
+
+    defaults = {
+        'interval': 90,
+        'whitelist': False,
+    }
+    with open(mirror_fname, 'r') as file:
+        mirrors = {}
+        for line in file.readlines():
+            mirror = dict(
+                pair.split('=', 1) for pair in line.strip().split(',')
+            )
+            mirror = {k: ast.literal_eval(v) for k, v in mirror.items()}
+            if not mirror.get('url', False):
+                raise ValueError('missing url key in {0}'.format(mirror_fname))
+            elif mirrors.get(mirror.get('url')):
+                raise ValueError(
+                    'duplicate url: {0}'.format(mirror.get('url'))
+                )
+            merged = defaults.copy()
+            merged.update(mirror)
+            mirrors[merged.get('url')] = merged
+        return list(mirrors.values())
+
+
 def load_config(config_fname):
     """Load configuration from yaml
 
@@ -583,13 +623,10 @@ def load_config(config_fname):
                         'duplicate definition of mirrors, using mirrors_file'
                     )
                     configs_yaml['backends'][0].pop('mirrors')
-                with open(
-                    configs_yaml['backends'][0].get('mirrors_file'), 'r'
-                ) as mirror_file:
-                    mirrors = mirror_file.readlines()
-                    configs_yaml['backends'][0]['mirrors'] = [
-                        {'url': url.strip()} for url in mirrors
-                    ]
+                    mirrors = _load_mirror_txt(
+                        configs_yaml['backends'][0].get('mirrors_file')
+                    )
+                    configs_yaml['backends'][0]['mirrors'] = mirrors
 
     except IOError:
         print('failed to open %s', config_fname)

@@ -13,6 +13,38 @@ def mock_mirror_status(url, max_ts, whitelist, reachable, mock_mirror):
     return mock_mirror
 
 
+class TestMirrorLoadFromFile(unittest.TestCase):
+
+    def test_simple_load(self):
+        config = "url='http://url1.com',interval=50,whitelist=True"
+        with mock.patch('builtins.open', mock.mock_open(read_data=config)):
+            res = mirror_checker._load_mirror_txt('file1')
+            self.assertEqual(
+                {
+                    "url": "http://url1.com",
+                    "interval": 50,
+                    "whitelist": True,
+                }, res[0]
+            )
+
+    def test_defaults_inserted(self):
+        config = "url='http://url1.com'"
+        with mock.patch('builtins.open', mock.mock_open(read_data=config)):
+            res = mirror_checker._load_mirror_txt('file1')
+            self.assertCountEqual(
+                ['url', 'interval', 'whitelist'], list(res[0].keys())
+            )
+
+    def test_no_url_exception(self):
+
+        config = ("url='http://url1.com'\n" "whitelist=True\n")
+
+        with mock.patch('builtins.open', mock.mock_open(read_data=config)):
+            self.assertRaises(
+                ValueError, mirror_checker._load_mirror_txt, 'file1'
+            )
+
+
 class TestMirrorFiltering(unittest.TestCase):
 
     @mock.patch('time.time')
