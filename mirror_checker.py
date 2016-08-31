@@ -624,10 +624,10 @@ def load_config(config_fname):
                         'duplicate definition of mirrors, using mirrors_file'
                     )
                     configs_yaml['backends'][0].pop('mirrors')
-                    mirrors = _load_mirror_txt(
-                        configs_yaml['backends'][0].get('mirrors_file')
-                    )
-                    configs_yaml['backends'][0]['mirrors'] = mirrors
+                mirrors = _load_mirror_txt(
+                    configs_yaml['backends'][0].get('mirrors_file')
+                )
+                configs_yaml['backends'][0]['mirrors'] = mirrors
 
     except IOError:
         print('failed to open %s', config_fname)
