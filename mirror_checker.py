@@ -139,10 +139,13 @@ class MirrorAPI(object):
             mirror_req = 'http://{0}'.format(mirror_req)
             mirror = self.backend.mirrors.get(mirror_req, False)
             if mirror:
-                seconds = int(time.time()) - mirror.max_ts
+                if mirror.max_ts < 0:
+                    res = mirror.max_ts
+                else:
+                    res = int(time.time()) - mirror.max_ts
                 return web.Response(
                     body=json.dumps(
-                        {mirror_req: seconds}, indent=4
+                        {mirror_req: res}, indent=4
                     ).encode('utf-8')
                 )
             return aiohttp.web.HTTPNotFound()
