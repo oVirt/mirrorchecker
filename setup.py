@@ -9,11 +9,8 @@ setup(
     url='http://www.github.com/nvgoldin/mirrorchecker',
     scripts=['mirror_checker.py'],
     install_requires=[
-        'paramiko>=2.0.3beta',
+        'paramiko>=2.0.2',
         'aiohttp',
         'PyYAML',
     ],
-    dependency_links=[
-        'https://github.com/nvgoldin/paramiko/tarball/proxycommand-closed-fix-789#egg=paramiko-2.0.3beta',
-    ]
 )
