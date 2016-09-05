@@ -411,7 +411,7 @@ class Mirror(object):
     """
 
     def __init__(
-        self, loop, files, url, interval=60, slow_start=2, whitelist=False
+        self, loop, files, url, interval=90, slow_start=0, whitelist=False
     ):
         """Initialize the mirror site object.
 
