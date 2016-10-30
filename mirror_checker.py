@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 import argparse
+import ast
 import asyncio
 import functools
 import itertools
 import json
 import logging
-import ast
-from logging.handlers import WatchedFileHandler
 import pprint
 import re
 import signal
@@ -15,12 +14,13 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from logging.handlers import WatchedFileHandler
 
 import aiohttp
-from aiohttp import web
 import paramiko
-from paramiko.ssh_exception import SSHException
 import yaml
+from aiohttp import web
+from paramiko.ssh_exception import SSHException
 
 LOGGER = 'mirror_checker'
 
