@@ -9,6 +9,7 @@ import logging
 import pprint
 import re
 import signal
+import socket
 import sys
 import threading
 import time
@@ -20,7 +21,10 @@ import aiohttp
 import paramiko
 import yaml
 from aiohttp import web
-from paramiko.ssh_exception import SSHException
+from paramiko.ssh_exception import (
+    SSHException, AuthenticationException, BadAuthenticationType,
+    BadHostKeyException, ChannelException, NoValidConnectionsError
+)
 
 LOGGER = 'mirror_checker'
 
@@ -273,10 +277,13 @@ class Backend(object):
                     begin = time.time()
                     for file in configs['dirs']:
                         path = '/'.join([configs['remote_path'], file.strip()])
-                        with sftp.open(path, 'w') as remote_file:
-                            timestamp = int(time.time())
-                            remote_file.write(str(timestamp))
-                            self.last_ts = timestamp
+                        try:
+                            with sftp.open(path, 'w') as remote_file:
+                                timestamp = int(time.time())
+                                remote_file.write(str(timestamp))
+                                self.last_ts = timestamp
+                        except IOError:
+                            logger.exception('failed to send %s', path)
                     end = time.time()
                     logger.info(
                         'sent %s files to %s:%s, took: %.4fs',
@@ -284,11 +291,18 @@ class Backend(object):
                         self.configs['ssh_args']['hostname'],
                         self.configs['remote_path'], (end - begin)
                     )
-                cancel_event.wait(configs['stamp_interval'])
-            except SSHException:
-                logger.exception('error sending files over SCP')
-                if cancel_event.is_set():
-                    raise
+            except (
+                AuthenticationException, BadAuthenticationType,
+                BadHostKeyException, ChannelException, NoValidConnectionsError,
+                SSHException, socket.timeout, socket.error
+            ):
+                logger.exception('SSH error:')
+            finally:
+                if not cancel_event.is_set():
+                    cancel_event.wait(configs['stamp_interval'])
+        logger.info(
+            'terminating, received exit event: %s', cancel_event.is_set()
+        )
 
     def _generate_dirs(self):
         """_generate_dirs"""
