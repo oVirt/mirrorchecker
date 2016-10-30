@@ -2,7 +2,7 @@ from distutils.core import setup
 
 setup(
     name='mirrorchecker',
-    version='0.1',
+    version='0.2',
     description='Mirror sites freshness check tool',
     author='Nadav Goldin',
     author_email='ngoldin@redhat.com',
