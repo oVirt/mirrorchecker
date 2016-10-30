@@ -376,8 +376,8 @@ class Backend(object):
     def _filter(self, mirrors, custom_filters=None, custom_whitelist=None):
         default_whitelist = [lambda mirror: mirror.whitelist]
         default_filters = [
-            lambda mirror: mirror.reachable,
-            lambda mirror: int(time.time()) - mirror.max_ts < self.configs['yum_threshold']
+            lambda mirror: mirror.reachable, lambda mirror: int(time.time()) -
+            mirror.max_ts < self.configs['yum_threshold']
         ]
         custom_filters = [] if custom_filters is None else custom_filters
         custom_whitelist = [] if custom_whitelist is None else custom_whitelist

@@ -14,7 +14,6 @@ def mock_mirror_status(url, max_ts, whitelist, reachable, mock_mirror):
 
 
 class TestMirrorLoadFromFile(unittest.TestCase):
-
     def test_simple_load(self):
         config = "url='http://url1.com',interval=50,whitelist=True"
         with mock.patch('builtins.open', mock.mock_open(read_data=config)):
@@ -46,7 +45,6 @@ class TestMirrorLoadFromFile(unittest.TestCase):
 
 
 class TestMirrorFiltering(unittest.TestCase):
-
     @mock.patch('time.time')
     def test_yum_threshold(self, mock_time):
         backend_no_init = object.__new__(mirror_checker.Backend)
@@ -77,8 +75,8 @@ class TestMirrorFiltering(unittest.TestCase):
         }
         expected = [key for key in mirrors.keys() if key.startswith('good')]
         self.assertCountEqual(
-            [mirror.url
-             for mirror in backend_no_init._filter(mirrors)], expected
+            [mirror.url for mirror in backend_no_init._filter(mirrors)],
+            expected
         )
 
     @mock.patch('time.time')
@@ -95,8 +93,8 @@ class TestMirrorFiltering(unittest.TestCase):
         }
         expected = [key for key in mirrors.keys() if key.startswith('good')]
         self.assertCountEqual(
-            [mirror.url
-             for mirror in backend_no_init._filter(mirrors)], expected
+            [mirror.url for mirror in backend_no_init._filter(mirrors)],
+            expected
         )
 
     @mock.patch('time.time')
