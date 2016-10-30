@@ -275,6 +275,7 @@ class Backend(object):
 
                 with self._get_sftp(self.configs['ssh_args']) as sftp:
                     begin = time.time()
+                    count = 0
                     for file in configs['dirs']:
                         path = '/'.join([configs['remote_path'], file.strip()])
                         try:
@@ -282,11 +283,12 @@ class Backend(object):
                                 timestamp = int(time.time())
                                 remote_file.write(str(timestamp))
                                 self.last_ts = timestamp
+                                count = count + 1
                         except IOError:
                             logger.exception('failed to send %s', path)
                     end = time.time()
                     logger.info(
-                        'sent %s files to %s:%s, took: %.4fs',
+                        'sent %s/%s files to %s:%s, took: %.4fs', count,
                         len(self.configs['dirs']),
                         self.configs['ssh_args']['hostname'],
                         self.configs['remote_path'], (end - begin)
