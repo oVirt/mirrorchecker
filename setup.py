@@ -6,7 +6,7 @@ setup(
     description='Mirror sites freshness check tool',
     author='Nadav Goldin',
     author_email='ngoldin@redhat.com',
-    url='http://www.github.com/nvgoldin/mirrorchecker',
+    url='http://mirrorchecker.readthedocs.org',
     scripts=['mirror_checker.py'],
     install_requires=[
         'paramiko>=2.0.2',

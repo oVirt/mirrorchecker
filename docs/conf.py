@@ -330,7 +330,7 @@ man_pages = [
 #  dir menu entry, description, category)
 texinfo_documents = [
     (master_doc, 'mirrorchecker', 'mirrorchecker Documentation',
-     author, 'mirrorchecker', 'One line description of project.',
+     author, 'mirrorchecker', 'check mirror sites synchronization status',
      'Miscellaneous'),
 ]
 

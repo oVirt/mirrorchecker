@@ -1,3 +1,6 @@
+mirrorchecker
+=============
+
 Introduction
 -------------
 *mirrorchecker* is a small tool that checks if mirror sites are synchronized
@@ -18,7 +21,7 @@ Notable Features
 .. _mirmon: https://www.staff.science.uu.nl/~penni101/mirmon/
 
 How does it work?
-^^^^^^^^^^^^^^^^^
+*****************
 *mirrorchecker* assumes you have SSH access to the *source site* (the site which mirror
 sites connect to, in order to pull updates). *mirrorchecker* does 4 things:
 
@@ -34,11 +37,11 @@ sites connect to, in order to pull updates). *mirrorchecker* does 4 things:
 At its base, it uses the simple concept that if mirroring is working properly,
 the timestamps 'planted' in the *source site* would reach to the mirror sites.
 
-.. _`nagios_alert`: https://gerrit.ovirt.org/gitweb?p=mirrorchecker.git;a=blob;f=examples/check_mirror.py
+.. _`nagios_alert`: https://gerrit.ovirt.org/gitweb?p=mirrorchecker.git;a=blob;f=examples/mirrorchecker_nagios_plugin.py
 
 
 How does mirrorchecker determines if a mirror site is synchronized?
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+*******************************************************************
 By default, all timestamps are fetched from the mirror sites URLs and compared
 to the local time, the maximal difference is set as the last synchronization
 time. This is, of course, not accurate, assuming the synchronization is done
@@ -48,7 +51,7 @@ usually sufficient. If what you are looking for is an accurate and atomic
 synchronization verification, this is not the tool for you.
 
 Installation
-^^^^^^^^^^^^
+------------
 
 1. Make sure you are using ``python3.5`` (in venv or global) and run::
 
@@ -56,7 +59,7 @@ Installation
 
 2. Running::
 
-        ./mirror_checker.py
+        mirror_checker.py
 
 
 3. See `mirrors.yaml`_ for a working example of the  configuration file.
@@ -71,23 +74,23 @@ Installation
 .. todo:: add python packaging
 
 Examples
-^^^^^^^^
+********
 1. See this for an example_ of deploying *mirrorchecker* in a Docker container,
    as used in the `oVirt project`_.
 
-2. For building a monitoring alert: see the nagios plugin: check_mirror_
+2. For building a monitoring alert: see the nagios plugin: `mirrorchecker_nagios_plugin`_
 
 .. _`oVirt project`: http://www.ovirt.org/
 .. _example: https://gerrit.ovirt.org/gitweb?p=ovirt-mirrorchecker.git;a=tree
-.. _check_mirror: https://gerrit.ovirt.org/gitweb?p=mirrorchecker.git;a=blob;f=examples/check_mirror.py
+.. _`mirrorchecker_nagios_plugin`: https://gerrit.ovirt.org/gitweb?p=mirrorchecker.git;a=blob;f=examples/mirrorchecker_nagios_plugin.py
 
 .. todo:: Add a complete example.
 
 
 Development
-^^^^^^^^^^^
+-----------
 1. *mirrorchecker* works with ``python 3.5``, and uses ``asyncio`` and ``aiohttp``,
-   other than its only major depdency is paramiko_.
+   other than that its only major depdency is paramiko_.
 2. The git repository is at: https://gerrit.ovirt.org/mirrorchecker.git
 3. For general information on how to use gerrit, see here_.
 4. Patches are welcome!
@@ -95,3 +98,22 @@ Development
 
 .. _here: https://www.ovirt.org/develop/dev-process/working-with-gerrit/
 .. _paramiko: http://www.paramiko.org/
+
+
+
+
+Source code
+-----------
+
+.. toctree::
+   :maxdepth: 4
+
+   mirror_checker
+
+
+
+Indices and tables
+------------------
+
+* :ref:`genindex`
+* :ref:`search`
