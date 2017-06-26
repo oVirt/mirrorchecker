@@ -495,7 +495,7 @@ class Mirror(object):
                             raise asyncio.CancelledError(result.args)
                         elif isinstance(
                             result, (
-                                aiohttp.errors.ClientConnectionError,
+                                aiohttp.ClientConnectionError,
                                 asyncio.TimeoutError
                             )
                         ):
