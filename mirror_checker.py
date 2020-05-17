@@ -62,6 +62,10 @@ class MirrorAPI(object):
                 self.backend.configs['yum_request']
             ), self.handler.yum_mirrorlist
         )
+        self.app.router.add_route(
+            'GET', self.backend.configs['prometheus_metrics'],
+            self.handler.all_mirrors_metrics
+        )
 
         self.srv = None
 
@@ -94,6 +98,30 @@ class MirrorAPI(object):
 
             """
             self.backend = backend
+
+        async def all_mirrors_metrics(self, request):
+            """Returns status of all mirror sites last synchronization time
+            in a format consumable by Prometheus.
+
+            Args:
+                request (aiohttp.web.Request):
+
+            Returns:
+                aiohttp.web.Response
+            """
+            result = []
+            for mirror in self.backend.mirrors.values():
+                line = []
+                metric = ["mirror_health_check", "{{url=\"{}\"}}".format(mirror.url)]
+                line.append(''.join(metric))
+                if mirror.max_ts < 0:
+                    line.append(str(mirror.max_ts))
+                else:
+                    seconds = int(time.time()) - mirror.max_ts
+                    line.append(str(seconds))
+                result.append(' '.join(line))
+            response = '\n'.join(result)
+            return web.Response(text=response)
 
         async def all_mirrors(self, request):
             """Returns status of all mirror sites last synchronization time
